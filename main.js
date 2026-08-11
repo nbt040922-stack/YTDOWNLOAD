@@ -2,33 +2,31 @@ const { app, BrowserWindow, ipcMain, dialog, session, shell, Tray, Menu } = requ
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const {
+  FINAL_PATH_PREFIX,
+  buildYtDlpBaseArgs,
+  extractFinalPath,
+  resolveBinaryPaths,
+  runEngineDiagnostics,
+  updateYtDlp
+} = require('./engine-runtime');
 
 let mainWindow;
 let tray = null;
 const activeProcesses = new Map();
 
-// Windows Chrome User-Agent
-const WINDOWS_CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
 // Dynamic Binary Path Resolver
-const binPath = app.isPackaged 
-  ? path.join(process.resourcesPath, 'bin') 
-  : path.join(__dirname, 'resources', 'bin');
-
-const ytdlpPath = path.join(binPath, 'yt-dlp.exe');
-const ffmpegPath = path.join(binPath, 'ffmpeg.exe');
-const denoPath = path.join(binPath, 'deno.exe');
+const binaryPaths = resolveBinaryPaths({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appDir: __dirname
+});
+const { ytdlpPath } = binaryPaths;
 const cookiesPath = path.join(app.getPath('userData'), 'cookies.txt');
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 const logPath = path.join(app.getPath('userData'), 'app_debug.log');
 
-// Environment Hard-coding for Portability
-const spawnEnv = { 
-  ...process.env, 
-  PATH: binPath + path.delimiter + process.env.PATH, // Prioritize internal bin
-  YTDLP_JS_RUNTIME: 'deno',
-  YTDLP_DENO_PACKAGE: denoPath 
-};
+const spawnEnv = { ...process.env };
 
 // Persistent Settings Manager
 function getSettings() {
@@ -60,17 +58,15 @@ function logToFile(message) {
 }
 
 // Verification & Startup
-function validateBinaries() {
-  const missing = [];
-  if (!fs.existsSync(ytdlpPath)) missing.push('yt-dlp.exe');
-  if (!fs.existsSync(ffmpegPath)) missing.push('ffmpeg.exe');
-  if (!fs.existsSync(denoPath)) missing.push('deno.exe');
-  
-  if (missing.length > 0) {
-    dialog.showErrorBox('System Check Failed', `Missing internal files: ${missing.join(', ')}\n\nPlease ensure you have placed all binaries into the resources/bin folder.`);
+async function validateBinaries() {
+  const diagnostics = await runEngineDiagnostics(binaryPaths, spawnEnv);
+  logToFile('Engine diagnostics: ' + JSON.stringify(diagnostics));
+  const failures = ['ytdlp', 'deno', 'ffmpeg'].filter(name => diagnostics[`${name}_status`] !== 'ok');
+  if (failures.length) {
+    const details = failures.map(name => `${name}: ${diagnostics[`${name}_status`]} (${diagnostics.errors[name] || 'unknown error'})`);
+    dialog.showErrorBox('System Check Failed', details.join('\n'));
     return false;
   }
-  logToFile('System validation successful: all internal binaries found.');
   return true;
 }
 
@@ -134,14 +130,9 @@ ipcMain.handle('open-external', (event, url) => shell.openExternal(url));
 
 ipcMain.handle('update-engine', async () => {
   logToFile('Checking for engine updates...');
-  if (!ensureBinaryExists(ytdlpPath)) return { code: 1, output: 'yt-dlp.exe not found' };
-
-  return new Promise((resolve) => {
-    const child = spawn(ytdlpPath, ['--update'], { env: spawnEnv });
-    let output = '';
-    child.stdout.on('data', d => output += d);
-    child.on('close', code => resolve({ code, output }));
-  });
+  const result = await updateYtDlp(binaryPaths, spawnEnv);
+  logToFile(`yt-dlp update: ${JSON.stringify(result)}`);
+  return result;
 });
 
 ipcMain.on('cancel-all-downloads', () => {
@@ -153,8 +144,7 @@ ipcMain.on('cancel-all-downloads', () => {
 ipcMain.handle('get-metadata', async (event, url) => {
   if (!ensureBinaryExists(ytdlpPath)) throw new Error('yt-dlp.exe missing');
 
-  const args = ['--dump-json', '--no-check-certificate', '--extractor-args', 'youtube:player_client=web,web_embedded', '--user-agent', WINDOWS_CHROME_UA];
-  if (fs.existsSync(cookiesPath)) args.push('--cookies', cookiesPath);
+  const args = [...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath }), '--dump-json'];
   args.push(url);
 
   return new Promise((resolve, reject) => {
@@ -182,13 +172,10 @@ ipcMain.handle('get-playlist-data', async (event, url) => {
 
   // Basic filter for shorts if URL contains /shorts
   const args = [
+    ...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath }),
     '--flat-playlist', 
-    '--dump-json', 
-    '--no-check-certificate', 
-    '--extractor-args', 'youtube:player_client=web,web_embedded', 
-    '--user-agent', WINDOWS_CHROME_UA
+    '--dump-json'
   ];
-  if (fs.existsSync(cookiesPath)) args.push('--cookies', cookiesPath);
   
   if (url.includes('/shorts')) {
     args.push('--match-filter', 'duration < 65'); // YouTube Shorts are usually under 60s
@@ -233,7 +220,7 @@ ipcMain.handle('get-playlist-data', async (event, url) => {
   });
 });
 
-ipcMain.on('download-video', (event, { id, url, savePath, title, subDir }) => {
+ipcMain.on('download-video', (event, { id, url, savePath, subDir }) => {
   if (!ensureBinaryExists(ytdlpPath)) {
     event.sender.send('download-error', { id, message: 'yt-dlp.exe missing' });
     return;
@@ -260,47 +247,43 @@ ipcMain.on('download-video', (event, { id, url, savePath, title, subDir }) => {
 
   logToFile(`Download [${id}] to ${finalSavePath}`);
   const args = [
-    '--ffmpeg-location', ffmpegPath, 
+    ...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath, ffmpeg: true }),
     '--output', path.join(finalSavePath, '%(title)s.%(ext)s'),
-    '--restrict-filenames',
     '--no-part',
     '-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4', '--newline', '--progress',
-    '--no-check-certificate', '--extractor-args', 'youtube:player_client=web,web_embedded', '--user-agent', WINDOWS_CHROME_UA
+    '--no-simulate', '--print', `after_move:${FINAL_PATH_PREFIX}%(filepath)s`
   ];
-  if (fs.existsSync(cookiesPath)) args.push('--cookies', cookiesPath);
   args.push(url);
 
   const subprocess = spawn(ytdlpPath, args, { env: spawnEnv });
   activeProcesses.set(id, subprocess);
+  let stdout = '';
+  let stderr = '';
 
   subprocess.stdout.on('data', (data) => {
     const line = data.toString();
+    stdout += line;
     const percentMatch = line.match(/\[download\]\s+(\d+\.?\d*)%/);
     const speedMatch = line.match(/at\s+([\d\.]+\w+\/s)/);
     if (percentMatch) event.sender.send('download-progress', { id, value: parseFloat(percentMatch[1]) });
     if (speedMatch) event.sender.send('download-speed', { id, value: speedMatch[1] });
   });
+  subprocess.stderr.on('data', data => { stderr += data.toString(); });
 
   subprocess.on('close', (code) => {
     activeProcesses.delete(id);
     if (code === 0) {
-      // Find the file (yt-dlp might have restricted the name)
-      const files = fs.readdirSync(finalSavePath);
-      const sanitizedTitle = title ? title.replace(/[^\w\s-]/g, '').substring(0, 15).toLowerCase() : '';
-      const exists = files.some(f => {
-        const lowerF = f.toLowerCase();
-        return lowerF.includes(sanitizedTitle) && 
-               (lowerF.endsWith('.mp4') || lowerF.endsWith('.mkv') || lowerF.endsWith('.webm') || lowerF.endsWith('.mov'));
-      });
-      
-      if (exists) {
-        event.sender.send('download-complete', { id });
+      const finalPath = stdout.split(/\r?\n/).map(extractFinalPath).filter(Boolean).pop();
+      if (finalPath && fs.existsSync(finalPath)) {
+        event.sender.send('download-complete', { id, path: finalPath });
       } else {
-        logToFile(`Post-verification failed for: ${title} in ${finalSavePath}`);
-        event.sender.send('download-error', { id, message: 'Missing output file (FFmpeg Error?)' });
+        logToFile(`yt-dlp did not report a valid final path for download ${id}`);
+        event.sender.send('download-error', { id, message: 'Downloaded file path was not reported or does not exist' });
       }
     } else {
-      event.sender.send('download-error', { id, message: `Process exited with code ${code}` });
+      const message = stderr.trim().split(/\r?\n/).pop() || `Process exited with code ${code}`;
+      logToFile(`Download ${id} failed: ${message}`);
+      event.sender.send('download-error', { id, message });
     }
   });
 });
@@ -361,9 +344,9 @@ ipcMain.handle('select-folder', async () => {
 });
 ipcMain.handle('get-default-path', () => currentSavePath || app.getPath('downloads'));
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (fs.existsSync(logPath)) fs.writeFileSync(logPath, '', 'utf8');
-  if (validateBinaries()) {
+  if (await validateBinaries()) {
     createTray();
     createWindow();
   }

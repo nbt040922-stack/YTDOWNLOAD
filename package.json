@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test",
     "build": "electron-builder",
     "dist": "electron-builder"
   },
@@ -38,7 +39,7 @@
       "target": [
         "portable"
       ],
-      "requestedExecutionLevel": "requireAdministrator"
+      "requestedExecutionLevel": "asInvoker"
     }
   }
 }

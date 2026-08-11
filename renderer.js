@@ -104,7 +104,10 @@ document.getElementById('btnUpdateEngine')?.addEventListener('click', async () =
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
     try {
         const result = await window.electronAPI.updateEngine();
-        alert(result.code === 0 ? 'Update successful!' : 'Update failed: ' + result.output);
+        const versions = `${result.old_version || 'unknown'} → ${result.new_version || 'unknown'}`;
+        alert(result.code === 0
+            ? `yt-dlp ${result.update_status}: ${versions}`
+            : `yt-dlp update ${result.update_status}: ${result.output}`);
     } catch (e) {
         alert('Update error: ' + e.message);
     } finally {
@@ -208,13 +211,15 @@ window.electronAPI.onDownloadSpeed(({ id, value }) => {
     if (speed) speed.innerText = value;
 });
 
-window.electronAPI.onDownloadComplete(({ id }) => {
+window.electronAPI.onDownloadComplete(({ id, path: outputPath }) => {
     activeDownloads--;
     completedDownloads++;
     updateFooterStatus();
     const card = document.getElementById(`card-${id}`);
     if (card) {
         card.classList.add('completed');
+        card.dataset.outputPath = outputPath;
+        card.title = outputPath;
         const fill = document.getElementById(`fill-${id}`);
         if (fill) fill.style.backgroundColor = '#4caf50';
         const speed = document.getElementById(`speed-${id}`);

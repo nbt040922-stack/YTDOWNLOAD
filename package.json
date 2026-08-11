@@ -1,7 +1,7 @@
 {
-  "name": "ytd-pro-v5-stacher",
-  "version": "7.1.8",
-  "description": "Premium Stacher-inspired YouTube Downloader powered by Deno",
+  "name": "ytdownload",
+  "version": "1.0.0",
+  "description": "YTDOWNLOAD desktop downloader powered by yt-dlp, Deno, and FFmpeg",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -19,15 +19,18 @@
     "electron-builder": "^24.9.1"
   },
   "build": {
-    "appId": "com.ytd.pro.v5",
-    "productName": "YTD Pro v5",
+    "appId": "com.ytdownload.app",
+    "productName": "YTDOWNLOAD",
     "directories": {
       "output": "dist"
     },
     "beforePack": "./scripts/preflight.js",
     "files": [
       "**/*",
-      "!resources/bin{,/**/*}"
+      "!resources/bin{,/**/*}",
+      "!test{,/**/*}",
+      "!scripts{,/**/*}",
+      "!PHASE*.md"
     ],
     "extraResources": [
       {

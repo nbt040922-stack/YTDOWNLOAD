@@ -124,6 +124,18 @@ test('temporary cookie file is removed after failed operation', async () => {
   assert.equal(fs.existsSync(filePath), false);
 });
 
+test('temporary cookie file is removed after cancelled operation', async () => {
+  const { auth } = makeAuth({ cookies: [signedInCookie] });
+  let filePath;
+  await assert.rejects(auth.withTemporaryCookies(async value => {
+    filePath = value;
+    const error = new Error('operation cancelled');
+    error.cancelled = true;
+    throw error;
+  }), /operation cancelled/);
+  assert.equal(fs.existsSync(filePath), false);
+});
+
 test('stale temporary auth files are cleaned on startup', async () => {
   const { auth } = makeAuth();
   fs.mkdirSync(auth.tempDirectory, { recursive: true });

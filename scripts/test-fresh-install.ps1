@@ -1,12 +1,13 @@
 param(
   [string]$AppPath,
   [string]$VideoUrl = 'https://www.youtube.com/watch?v=jNQXAC9IVRw',
-  [switch]$SkipNetwork
+  [switch]$SkipNetwork,
+  [switch]$KeepArtifacts
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-if (-not $AppPath) { $AppPath = Join-Path $projectRoot 'dist\win-unpacked\YTD Pro v5.exe' }
+if (-not $AppPath) { $AppPath = Join-Path $projectRoot 'dist\win-unpacked\YTDOWNLOAD.exe' }
 $AppPath = (Resolve-Path -LiteralPath $AppPath).Path
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('ytdownload-fresh-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testRoot | Out-Null
@@ -38,6 +39,7 @@ try {
   }
 
   $downloadPath = $null
+  $duration = $null
   if (-not $SkipNetwork) {
     $metadata = & $ytDlp '--encoding' 'utf-8' '--js-runtimes' "deno:$deno" '--remote-components' 'ejs:github' '--no-playlist' '--dump-json' $VideoUrl
     if ($LASTEXITCODE -ne 0) { throw 'Public metadata test failed.' }
@@ -59,6 +61,9 @@ try {
     if (-not ($streams | Where-Object { $_ -match 'Stream #.*Video:' }) -or -not ($streams | Where-Object { $_ -match 'Stream #.*Audio:' })) {
       throw 'Merged output does not contain both video and audio.'
     }
+    $durationLine = $streams | Where-Object { $_ -match 'Duration: ([0-9:.]+)' } | Select-Object -First 1
+    if (-not $durationLine) { throw 'Merged output does not report a playable duration.' }
+    $duration = [regex]::Match([string]$durationLine, 'Duration: ([0-9:.]+)').Groups[1].Value
   }
 
   [pscustomobject]@{
@@ -68,9 +73,15 @@ try {
     RuntimeSource = $state.engines.ytdlp.recovery_source
     NetworkTest = -not $SkipNetwork
     Download = $downloadPath
+    Duration = $duration
     PATH = $env:PATH
   }
 } finally {
   if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
   $env:PATH = $savedPath
+  $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+  $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)
+  if (-not $KeepArtifacts -and $resolvedTestRoot.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase) -and (Split-Path -Leaf $resolvedTestRoot) -like 'ytdownload-fresh-*') {
+    Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force
+  }
 }

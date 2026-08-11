@@ -154,9 +154,9 @@ function createTray() {
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Show App', click: () => { if(mainWindow) mainWindow.show(); } },
     { type: 'separator' },
-    { label: 'Quit YTD Pro', click: () => { app.isQuiting = true; app.quit(); } }
+    { label: 'Quit YTDOWNLOAD', click: () => { app.isQuiting = true; app.quit(); } }
   ]);
-  tray.setToolTip('YTD Pro v7.1.8');
+  tray.setToolTip('YTDOWNLOAD v1.0.0');
   tray.setContextMenu(contextMenu);
   tray.on('double-click', () => { if(mainWindow) mainWindow.show(); });
 }
@@ -166,7 +166,7 @@ ipcMain.on('window-minimize', () => mainWindow.minimize());
 ipcMain.on('minimize-to-tray', () => {
   mainWindow.hide();
   if (process.platform === 'win32') {
-    tray.displayBalloon({ title: 'YTD Pro', content: 'App is still running in the system tray.' });
+    tray.displayBalloon({ title: 'YTDOWNLOAD', content: 'App is still running in the system tray.' });
   }
 });
 ipcMain.on('window-maximize', () => {

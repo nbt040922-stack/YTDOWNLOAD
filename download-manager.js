@@ -30,9 +30,11 @@ const INTERRUPTED_STATES = new Set([
 
 function safeMessage(message) {
   return String(message || 'Unknown error')
-    .replace(/cookie\s*[:=]\s*\S+/gi, 'cookie=[REDACTED]')
-    .replace(/authorization\s*[:=]\s*\S+(?:\s+\S+)?/gi, 'authorization=[REDACTED]')
+    .replace(/(?:set-)?cookie\s*[:=]\s*[^\r\n]+/gi, 'cookie=[REDACTED]')
+    .replace(/authorization\s*[:=]\s*[^\r\n]+/gi, 'authorization=[REDACTED]')
     .replace(/bearer\s+\S+/gi, 'Bearer [REDACTED]')
+    .replace(/(?:access|refresh|oauth|session)[_-]?token\s*[:=]\s*\S+/gi, 'token=[REDACTED]')
+    .replace(/password\s*[:=]\s*\S+/gi, 'password=[REDACTED]')
     .slice(0, 500);
 }
 

@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { DownloadManager, JOB_STATES, PROGRESS_PREFIX, parseYtDlpProgress } = require('./download-manager');
+const { YouTubeAuthSession, isAuthRequired, redactSensitive } = require('./auth-session');
 const {
   FINAL_PATH_PREFIX,
   buildYtDlpBaseArgs,
@@ -23,6 +24,7 @@ let tray = null;
 let latestDiagnostics = null;
 let updateInFlight = null;
 let downloadManager = null;
+let youtubeAuth = null;
 const MAX_CONCURRENT_DOWNLOADS = 2;
 
 // Dynamic Binary Path Resolver
@@ -32,7 +34,7 @@ const binaryPaths = resolveBinaryPaths({
   appDir: __dirname
 });
 const { ytdlpPath } = binaryPaths;
-const cookiesPath = path.join(app.getPath('userData'), 'cookies.txt');
+const legacyCookiesPath = path.join(app.getPath('userData'), 'cookies.txt');
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 const logPath = path.join(app.getPath('userData'), 'app_debug.log');
 const jobsPath = path.join(app.getPath('userData'), 'download-jobs.json');
@@ -92,6 +94,12 @@ function logUpdateResult(result) {
 function notifyEngineStatus() {
   if (mainWindow && !mainWindow.isDestroyed() && latestDiagnostics) {
     mainWindow.webContents.send('engine-status-updated', latestDiagnostics);
+  }
+}
+
+function notifyAuthState(state) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('auth-state-updated', state);
   }
 }
 
@@ -183,6 +191,9 @@ ipcMain.handle('repair-engine', async () => {
 });
 
 ipcMain.handle('get-engine-status', () => latestDiagnostics);
+ipcMain.handle('get-auth-state', () => youtubeAuth?.state || 'UNKNOWN');
+ipcMain.handle('login-youtube', () => youtubeAuth.login());
+ipcMain.handle('logout-youtube', () => youtubeAuth.logout());
 
 ipcMain.on('cancel-all-downloads', () => {
   downloadManager?.cancelAll('user');
@@ -190,71 +201,64 @@ ipcMain.on('cancel-all-downloads', () => {
 
 async function fetchMetadata(url) {
   if (!ensureBinaryExists(ytdlpPath)) throw new Error('yt-dlp.exe missing');
-
-  const args = [...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath }), '--dump-json'];
-  args.push(url);
-  const result = await executeWithRecovery({
-    operation: () => runProcess(ytdlpPath, args, { env: spawnEnv, timeoutMs: 0 }),
-    recover: performSafeUpdate,
-    trigger: 'METADATA_FAILURE',
-    logger: recoveryLogger
+  return youtubeAuth.withTemporaryCookies(async cookiesPath => {
+    const args = [...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath }), '--dump-json', url];
+    const result = await executeWithRecovery({
+      operation: () => runProcess(ytdlpPath, args, { env: spawnEnv, timeoutMs: 0 }),
+      recover: performSafeUpdate,
+      trigger: 'METADATA_FAILURE',
+      logger: recoveryLogger
+    });
+    if (!result.ok) {
+      const errorMsg = result.stderr || result.error || 'Unknown error occurred';
+      logToFile(`Metadata fetch failed: ${classifyYtDlpFailure(errorMsg).reason}`);
+      const error = new Error(isAuthRequired(errorMsg) ? 'YouTube sign-in required' : errorMsg);
+      error.authRequired = isAuthRequired(errorMsg);
+      error.engineFailure = Boolean(result.recovery && result.recovery.update_status !== 'NOT_CHECKED');
+      throw error;
+    }
+    try { return JSON.parse(result.stdout); } catch(e) {
+      logToFile('Metadata parse failed: ' + e.message);
+      throw new Error('Metadata parse error');
+    }
   });
-  if (!result.ok) {
-    const errorMsg = result.stderr || result.error || 'Unknown error occurred';
-    logToFile(`Metadata fetch failed: ${classifyYtDlpFailure(errorMsg).reason}`);
-    const error = new Error(errorMsg);
-    error.engineFailure = Boolean(result.recovery && result.recovery.update_status !== 'NOT_CHECKED');
-    throw error;
-  }
-  try { return JSON.parse(result.stdout); } catch(e) {
-    logToFile('Metadata parse failed: ' + e.message);
-    throw new Error('Metadata parse error');
-  }
 }
 
 ipcMain.handle('get-playlist-data', async (event, url) => {
   if (!ensureBinaryExists(ytdlpPath)) throw new Error('yt-dlp.exe missing');
+  return youtubeAuth.withTemporaryCookies(async cookiesPath => {
+    const args = [...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath }), '--flat-playlist', '--dump-json'];
+    if (url.includes('/shorts')) args.push('--match-filter', 'duration < 65');
+    args.push(url);
 
-  // Basic filter for shorts if URL contains /shorts
-  const args = [
-    ...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath }),
-    '--flat-playlist', 
-    '--dump-json'
-  ];
-  
-  if (url.includes('/shorts')) {
-    args.push('--match-filter', 'duration < 65'); // YouTube Shorts are usually under 60s
-  }
-  
-  args.push(url);
-
-  const result = await executeWithRecovery({
-    operation: () => runProcess(ytdlpPath, args, { env: spawnEnv, timeoutMs: 0 }),
-    recover: performSafeUpdate,
-    trigger: 'PLAYLIST_FAILURE',
-    logger: recoveryLogger
-  });
-  if (!result.ok) {
-    const errorMsg = result.stderr || result.error || 'Unknown error occurred';
-    logToFile(`Playlist fetch failed: ${classifyYtDlpFailure(errorMsg).reason}`);
-    throw new Error(errorMsg);
-  }
-  try {
-    return result.stdout.trim().split('\n').map(line => {
-      const data = JSON.parse(line);
-      return {
-        id: data.id,
-        title: data.title,
-        url: data.url || `https://www.youtube.com/watch?v=${data.id}`,
-        duration: data.duration,
-        thumbnail: data.thumbnails ? data.thumbnails[0].url : (data.thumbnail || ''),
-        uploader: data.uploader || 'YouTube'
-      };
+    const result = await executeWithRecovery({
+      operation: () => runProcess(ytdlpPath, args, { env: spawnEnv, timeoutMs: 0 }),
+      recover: performSafeUpdate,
+      trigger: 'PLAYLIST_FAILURE',
+      logger: recoveryLogger
     });
-  } catch(e) {
-    logToFile('Parse error in get-playlist-data: ' + e.message);
-    throw new Error('Playlist metadata parse error');
-  }
+    if (!result.ok) {
+      const errorMsg = result.stderr || result.error || 'Unknown error occurred';
+      logToFile(`Playlist fetch failed: ${classifyYtDlpFailure(errorMsg).reason}`);
+      throw new Error(isAuthRequired(errorMsg) ? 'YouTube sign-in required' : errorMsg);
+    }
+    try {
+      return result.stdout.trim().split('\n').map(line => {
+        const data = JSON.parse(line);
+        return {
+          id: data.id,
+          title: data.title,
+          url: data.url || `https://www.youtube.com/watch?v=${data.id}`,
+          duration: data.duration,
+          thumbnail: data.thumbnails ? data.thumbnails[0].url : (data.thumbnail || ''),
+          uploader: data.uploader || 'YouTube'
+        };
+      });
+    } catch(e) {
+      logToFile('Parse error in get-playlist-data: ' + e.message);
+      throw new Error('Playlist metadata parse error');
+    }
+  });
 });
 
 function runManagedDownloadProcess(job, args, context) {
@@ -313,6 +317,9 @@ async function executeDownloadJob(job, context) {
     const metadata = await fetchMetadata(job.url);
     context.update({ title: metadata.title || job.title, thumbnail: metadata.thumbnail || job.thumbnail });
   } catch (error) {
+    if (error.authRequired || isAuthRequired(error.message)) {
+      return { ok: false, errorMessage: 'YouTube sign-in required', errorCategory: 'AUTH' };
+    }
     const failure = classifyYtDlpFailure(error.message);
     return { ok: false, errorMessage: error.message, engineFailure: error.engineFailure || failure.recoverable };
   }
@@ -331,23 +338,29 @@ async function executeDownloadJob(job, context) {
   }
 
   context.setState(JOB_STATES.DOWNLOADING);
-  const args = [
-    ...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath, ffmpeg: true }),
-    '--output', path.join(finalSavePath, '%(title)s.%(ext)s'),
-    '--no-part',
-    '-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4', '--newline', '--progress',
-    '--progress-template', `download:${PROGRESS_PREFIX}%(progress._percent_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s`,
-    '--no-simulate', '--print', `after_move:${FINAL_PATH_PREFIX}%(filepath)s`,
-    job.url
-  ];
-  const result = await executeWithRecovery({
-    operation: () => runManagedDownloadProcess(job, args, context),
-    recover: performSafeUpdate,
-    trigger: 'DOWNLOAD_FAILURE',
-    logger: recoveryLogger
+  const result = await youtubeAuth.withTemporaryCookies(async cookiesPath => {
+    const args = [
+      ...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath, ffmpeg: true }),
+      '--output', path.join(finalSavePath, '%(title)s.%(ext)s'),
+      '--no-part',
+      '-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4', '--newline', '--progress',
+      '--progress-template', `download:${PROGRESS_PREFIX}%(progress._percent_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s`,
+      '--no-simulate', '--print', `after_move:${FINAL_PATH_PREFIX}%(filepath)s`,
+      job.url
+    ];
+    return executeWithRecovery({
+      operation: () => runManagedDownloadProcess(job, args, context),
+      recover: performSafeUpdate,
+      trigger: 'DOWNLOAD_FAILURE',
+      logger: recoveryLogger
+    });
   });
   if (!result.ok) {
     if (context.isCancelled()) return { ok: false, cancelled: true };
+    const fullMessage = result.stderr || result.error || `Process exited with code ${result.code}`;
+    if (isAuthRequired(fullMessage)) {
+      return { ok: false, errorMessage: 'YouTube sign-in required', errorCategory: 'AUTH' };
+    }
     const message = result.stderr?.trim().split(/\r?\n/).pop() || result.error || `Process exited with code ${result.code}`;
     const engineRecoveryUsed = Boolean(result.recovery && result.recovery.update_status !== 'NOT_CHECKED');
     return { ok: false, errorMessage: message, engineFailure: engineRecoveryUsed || classifyYtDlpFailure(message).recoverable };
@@ -361,46 +374,6 @@ ipcMain.handle('get-download-jobs', () => downloadManager?.list() || []);
 ipcMain.handle('cancel-download-job', (event, id) => downloadManager.cancel(id, 'user'));
 ipcMain.handle('retry-download-job', (event, id) => downloadManager.retry(id));
 ipcMain.handle('clear-download-jobs', (event, states) => downloadManager.clear(states));
-
-// Cookie Format Conversion (Netscape format)
-async function exportCookiesToNetscape() {
-  const cookies = await session.defaultSession.cookies.get({ domain: '.youtube.com' });
-  let content = '# Netscape HTTP Cookie File\n';
-  content += '# http://curl.haxx.se/rfc/cookie_spec.html\n';
-  content += '# This is a generated file!  Do not edit.\n\n';
-
-  cookies.forEach(c => {
-    const domain = c.domain.startsWith('.') ? c.domain : `.${c.domain}`;
-    const includeSubdomains = 'TRUE';
-    const path = c.path || '/';
-    const secure = c.secure ? 'TRUE' : 'FALSE';
-    const expires = c.expirationDate ? Math.floor(c.expirationDate) : 0;
-    content += `${domain}\t${includeSubdomains}\t${path}\t${secure}\t${expires}\t${c.name}\t${c.value}\n`;
-  });
-
-  fs.writeFileSync(cookiesPath, content, 'utf8');
-  logToFile(`Cookies exported to ${cookiesPath} (${cookies.length} items)`);
-}
-
-ipcMain.handle('login-youtube', async () => {
-  return new Promise((resolve, reject) => {
-    const loginWin = new BrowserWindow({
-      width: 800, height: 600,
-      title: 'Login to YouTube',
-      webPreferences: { nodeIntegration: false, contextIsolation: true }
-    });
-
-    loginWin.loadURL('https://youtube.com');
-    loginWin.on('closed', async () => {
-      try {
-        await exportCookiesToNetscape();
-        resolve();
-      } catch (e) {
-        reject(e);
-      }
-    });
-  });
-});
 
 ipcMain.handle('select-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, { 
@@ -420,6 +393,17 @@ ipcMain.handle('get-default-path', () => currentSavePath || app.getPath('downloa
 
 app.whenReady().then(async () => {
   if (fs.existsSync(logPath)) fs.writeFileSync(logPath, '', 'utf8');
+  youtubeAuth = new YouTubeAuthSession({
+    sessionFromPartition: partition => session.fromPartition(partition, { cache: true }),
+    createBrowserWindow: options => new BrowserWindow({ ...options, parent: mainWindow || undefined }),
+    userDataPath: app.getPath('userData'),
+    onStateChange: notifyAuthState,
+    logger: record => logToFile(`Auth: ${redactSensitive(JSON.stringify(record))}`)
+  });
+  await youtubeAuth.initialize();
+  if (fs.existsSync(legacyCookiesPath)) {
+    logToFile('Legacy cookies.txt retained but disabled; dedicated YouTube session is primary.');
+  }
   if (await validateBinaries()) {
     downloadManager = new DownloadManager({
       jobsPath,

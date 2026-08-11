@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getDefaultPath: () => ipcRenderer.invoke('get-default-path'),
   loginYouTube: () => ipcRenderer.invoke('login-youtube'),
+  logoutYouTube: () => ipcRenderer.invoke('logout-youtube'),
+  getAuthState: () => ipcRenderer.invoke('get-auth-state'),
 
   // Download Engine
   getPlaylistData: (url) => ipcRenderer.invoke('get-playlist-data', url),
@@ -31,5 +33,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Listeners
   onDownloadJobsUpdated: (callback) => ipcRenderer.on('download-jobs-updated', (event, data) => callback(data)),
-  onEngineStatusUpdated: (callback) => ipcRenderer.on('engine-status-updated', (event, data) => callback(data))
+  onEngineStatusUpdated: (callback) => ipcRenderer.on('engine-status-updated', (event, data) => callback(data)),
+  onAuthStateUpdated: (callback) => ipcRenderer.on('auth-state-updated', (event, data) => callback(data))
 });

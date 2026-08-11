@@ -19,12 +19,24 @@ let downloadJobs = [];
 document.getElementById('winMinimize')?.addEventListener('click', () => window.electronAPI.minimizeWindow());
 document.getElementById('winMaximize')?.addEventListener('click', () => window.electronAPI.maximizeWindow());
 document.getElementById('winClose')?.addEventListener('click', () => window.electronAPI.closeWindow());
-document.getElementById('btnLogin')?.addEventListener('click', async () => {
+
+async function loginYouTube() {
     try {
-        await window.electronAPI.loginYouTube();
-        alert('Login check completed! Cookies have been updated.');
+        const state = await window.electronAPI.loginYouTube();
+        updateAuthStateView(state);
+        alert(state === 'SIGNED_IN' ? 'YouTube sign-in saved.' : 'YouTube sign-in was not detected.');
     } catch (error) {
         alert('Login Error: ' + error.message);
+    }
+}
+
+document.getElementById('btnLogin')?.addEventListener('click', loginYouTube);
+document.getElementById('btnLoginYouTube')?.addEventListener('click', loginYouTube);
+document.getElementById('btnLogoutYouTube')?.addEventListener('click', async () => {
+    try {
+        updateAuthStateView(await window.electronAPI.logoutYouTube());
+    } catch (error) {
+        alert('Logout Error: ' + error.message);
     }
 });
 
@@ -34,6 +46,14 @@ function updateEngineStatusView(status) {
     const denoVersion = document.getElementById('denoVersion');
     if (ytDlpVersion) ytDlpVersion.innerText = `yt-dlp: ${status.yt_dlp_version || status.ytdlp_status}`;
     if (denoVersion) denoVersion.innerText = `Deno: ${status.deno_version?.split(/\s+/)[1] || status.deno_status}`;
+}
+
+function updateAuthStateView(state) {
+    const label = document.getElementById('youtubeAuthState');
+    const text = state === 'SIGNED_IN' ? 'Signed in' : state === 'SIGNED_OUT' ? 'Not signed in' : 'Unknown';
+    if (label) label.innerText = `YouTube: ${text}`;
+    const loginIcon = document.getElementById('btnLogin');
+    if (loginIcon) loginIcon.title = `YouTube: ${text}`;
 }
 
 function updateFooterStatus() {
@@ -132,11 +152,13 @@ function renderAllJobs(jobs) {
 
 window.electronAPI.onDownloadJobsUpdated(renderAllJobs);
 window.electronAPI.onEngineStatusUpdated(updateEngineStatusView);
+window.electronAPI.onAuthStateUpdated(updateAuthStateView);
 
 async function initApp() {
     currentSavePath = await window.electronAPI.getDefaultPath();
     if (currentPathText) currentPathText.innerText = currentSavePath;
     updateEngineStatusView(await window.electronAPI.getEngineStatus());
+    updateAuthStateView(await window.electronAPI.getAuthState());
     renderAllJobs(await window.electronAPI.getDownloadJobs());
 }
 

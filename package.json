@@ -25,6 +25,10 @@
       "output": "dist"
     },
     "beforePack": "./scripts/preflight.js",
+    "files": [
+      "**/*",
+      "!resources/bin{,/**/*}"
+    ],
     "extraResources": [
       {
         "from": "resources/bin/fallback/",

@@ -82,7 +82,7 @@ The same preflight is registered as electron-builder's `beforePack` hook, so dir
 - `dist/YTD Pro v5 7.1.8.exe`
 - `dist/win-unpacked/`
 
-The unpacked package contains only the three immutable engines under `resources/bin/fallback`.
+The source `resources/bin` tree is explicitly excluded from `app.asar`; `extraResources` then adds only the three immutable engines under packaged `resources/bin/fallback`. This prevents duplicate hidden binary copies.
 
 ## Fresh-install validation
 

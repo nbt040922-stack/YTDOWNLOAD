@@ -52,6 +52,10 @@ function runPreflight({ projectDir = path.resolve(__dirname, '..'), run = spawnS
   if (!resources.some(resource => resource.from === 'resources/bin/fallback/' && resource.to === 'bin/fallback/')) {
     failures.push('package config does not include immutable fallback binaries');
   }
+  const files = metadata?.build?.files || [];
+  if (!files.includes('!resources/bin{,/**/*}')) {
+    failures.push('package config does not exclude source binaries from app.asar');
+  }
   if (failures.length) throw new Error(`Build preflight failed:\n- ${failures.join('\n- ')}`);
   return { ok: true, fallbackDir, versions };
 }

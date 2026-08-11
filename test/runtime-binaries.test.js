@@ -171,7 +171,10 @@ test('build preflight fails clearly when fallback binaries are missing', () => {
   fs.writeFileSync(path.join(root, 'resources', 'mascot.png'), 'image');
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({
     name: 'test', version: '1.0.0', main: 'main.js',
-    build: { extraResources: [{ from: 'resources/bin/fallback/', to: 'bin/fallback/' }] }
+    build: {
+      files: ['**/*', '!resources/bin{,/**/*}'],
+      extraResources: [{ from: 'resources/bin/fallback/', to: 'bin/fallback/' }]
+    }
   }));
   assert.throws(() => runPreflight({ projectDir: root }), /missing fallback binary: yt-dlp\.exe/);
 });

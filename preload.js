@@ -21,15 +21,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loginYouTube: () => ipcRenderer.invoke('login-youtube'),
 
   // Download Engine
-  getMetadata: (url) => ipcRenderer.invoke('get-metadata', url),
   getPlaylistData: (url) => ipcRenderer.invoke('get-playlist-data', url),
-  downloadVideo: (params) => ipcRenderer.send('download-video', params),
+  enqueueDownloadJobs: (jobs) => ipcRenderer.invoke('enqueue-download-jobs', jobs),
+  getDownloadJobs: () => ipcRenderer.invoke('get-download-jobs'),
+  cancelDownloadJob: (id) => ipcRenderer.invoke('cancel-download-job', id),
+  retryDownloadJob: (id) => ipcRenderer.invoke('retry-download-job', id),
+  clearDownloadJobs: (states) => ipcRenderer.invoke('clear-download-jobs', states),
   cancelAllDownloads: () => ipcRenderer.send('cancel-all-downloads'),
   
   // Listeners
-  onDownloadProgress: (callback) => ipcRenderer.on('download-progress', (event, data) => callback(data)),
-  onDownloadSpeed: (callback) => ipcRenderer.on('download-speed', (event, data) => callback(data)),
-  onDownloadComplete: (callback) => ipcRenderer.on('download-complete', (event, data) => callback(data)),
-  onDownloadError: (callback) => ipcRenderer.on('download-error', (event, data) => callback(data)),
+  onDownloadJobsUpdated: (callback) => ipcRenderer.on('download-jobs-updated', (event, data) => callback(data)),
   onEngineStatusUpdated: (callback) => ipcRenderer.on('engine-status-updated', (event, data) => callback(data))
 });

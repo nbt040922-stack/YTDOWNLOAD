@@ -119,10 +119,11 @@ main { flex: 1; display: flex; flex-direction: column; padding: 16px 24px; gap: 
 .download-list { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 900px; margin: 0 auto; }
 .download-card.completed { border-color: #4caf50; background-color: rgba(76, 175, 80, 0.05); }
 .download-card.error { border-color: var(--accent-danger); background-color: rgba(244, 67, 54, 0.05); }
+.download-card.cancelled { opacity: 0.7; }
 .card-thumbnail { width: 80px; height: 45px; background-color: var(--bg-main); border-radius: 6px; overflow: hidden; flex-shrink: 0; position: relative; }
 .card-thumbnail img { width: 100%; height: 100%; object-fit: cover; }
 .card-status-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; font-size: 14px; opacity: 0; transition: opacity 0.2s; }
-.download-card:not(.completed):not(.error) .card-status-overlay { opacity: 1; }
+.download-card:not(.completed):not(.error):not(.cancelled) .card-status-overlay { opacity: 1; }
 
 .card-content { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .card-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

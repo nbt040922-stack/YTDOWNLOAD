@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, session, shell, Tray, Menu } = requ
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { DownloadManager, JOB_STATES, PROGRESS_PREFIX, parseYtDlpProgress } = require('./download-manager');
 const {
   FINAL_PATH_PREFIX,
   buildYtDlpBaseArgs,
@@ -21,7 +22,8 @@ let mainWindow;
 let tray = null;
 let latestDiagnostics = null;
 let updateInFlight = null;
-const activeProcesses = new Map();
+let downloadManager = null;
+const MAX_CONCURRENT_DOWNLOADS = 2;
 
 // Dynamic Binary Path Resolver
 const binaryPaths = resolveBinaryPaths({
@@ -33,6 +35,7 @@ const { ytdlpPath } = binaryPaths;
 const cookiesPath = path.join(app.getPath('userData'), 'cookies.txt');
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 const logPath = path.join(app.getPath('userData'), 'app_debug.log');
+const jobsPath = path.join(app.getPath('userData'), 'download-jobs.json');
 
 const spawnEnv = { ...process.env };
 
@@ -182,12 +185,10 @@ ipcMain.handle('repair-engine', async () => {
 ipcMain.handle('get-engine-status', () => latestDiagnostics);
 
 ipcMain.on('cancel-all-downloads', () => {
-  logToFile(`Cancelling all downloads: ${activeProcesses.size} active tasks.`);
-  activeProcesses.forEach((proc, id) => { try { proc.kill(); } catch(e) {} });
-  activeProcesses.clear();
+  downloadManager?.cancelAll('user');
 });
 
-ipcMain.handle('get-metadata', async (event, url) => {
+async function fetchMetadata(url) {
   if (!ensureBinaryExists(ytdlpPath)) throw new Error('yt-dlp.exe missing');
 
   const args = [...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath }), '--dump-json'];
@@ -201,13 +202,15 @@ ipcMain.handle('get-metadata', async (event, url) => {
   if (!result.ok) {
     const errorMsg = result.stderr || result.error || 'Unknown error occurred';
     logToFile(`Metadata fetch failed: ${classifyYtDlpFailure(errorMsg).reason}`);
-    throw new Error(errorMsg);
+    const error = new Error(errorMsg);
+    error.engineFailure = Boolean(result.recovery && result.recovery.update_status !== 'NOT_CHECKED');
+    throw error;
   }
   try { return JSON.parse(result.stdout); } catch(e) {
     logToFile('Metadata parse failed: ' + e.message);
     throw new Error('Metadata parse error');
   }
-});
+}
 
 ipcMain.handle('get-playlist-data', async (event, url) => {
   if (!ensureBinaryExists(ytdlpPath)) throw new Error('yt-dlp.exe missing');
@@ -254,93 +257,110 @@ ipcMain.handle('get-playlist-data', async (event, url) => {
   }
 });
 
-function runDownloadAttempt(event, id, args) {
+function runManagedDownloadProcess(job, args, context) {
   return new Promise((resolve) => {
     const subprocess = spawn(ytdlpPath, args, { env: spawnEnv, windowsHide: true });
-    activeProcesses.set(id, subprocess);
+    context.registerProcess(subprocess);
     let stdout = '';
     let stderr = '';
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
     let settled = false;
     const finish = result => {
       if (settled) return;
       settled = true;
-      activeProcesses.delete(id);
       resolve({ stdout, stderr, ...result });
     };
 
-    subprocess.stdout.on('data', (data) => {
-      const line = data.toString();
-      stdout += line;
-      const percentMatch = line.match(/\[download\]\s+(\d+\.?\d*)%/);
-      const speedMatch = line.match(/at\s+([\d\.]+\w+\/s)/);
-      if (percentMatch) event.sender.send('download-progress', { id, value: parseFloat(percentMatch[1]) });
-      if (speedMatch) event.sender.send('download-speed', { id, value: speedMatch[1] });
-    });
-    subprocess.stderr.on('data', data => { stderr += data.toString(); });
+    const handleLine = line => {
+      const progress = parseYtDlpProgress(line);
+      if (progress) context.update(progress);
+      if (/^\[(?:Merger|VideoRemuxer|Fixup)/.test(line)) context.setState(JOB_STATES.MERGING);
+    };
+    const consume = (chunk, isStderr) => {
+      const text = chunk.toString();
+      if (isStderr) {
+        stderr += text;
+        stderrBuffer += text;
+        const lines = stderrBuffer.split(/\r?\n/);
+        stderrBuffer = lines.pop();
+        lines.forEach(handleLine);
+      } else {
+        stdout += text;
+        stdoutBuffer += text;
+        const lines = stdoutBuffer.split(/\r?\n/);
+        stdoutBuffer = lines.pop();
+        lines.forEach(handleLine);
+      }
+    };
+    subprocess.stdout.on('data', data => consume(data, false));
+    subprocess.stderr.on('data', data => consume(data, true));
     subprocess.on('error', error => finish({ ok: false, code: null, error: error.message }));
-    subprocess.on('close', code => finish({ ok: code === 0, code, error: code === 0 ? null : `Process exited with code ${code}` }));
+    subprocess.on('close', code => {
+      if (stdoutBuffer) handleLine(stdoutBuffer);
+      if (stderrBuffer) handleLine(stderrBuffer);
+      finish({ ok: code === 0, code, error: code === 0 ? null : `Process exited with code ${code}` });
+    });
   });
 }
 
-ipcMain.on('download-video', (event, { id, url, savePath, subDir }) => {
+async function executeDownloadJob(job, context) {
   if (!ensureBinaryExists(ytdlpPath)) {
-    event.sender.send('download-error', { id, message: 'yt-dlp.exe missing' });
-    return;
+    return { ok: false, errorMessage: 'yt-dlp.exe missing', errorCategory: 'PERMANENT' };
   }
 
-  let finalSavePath = savePath;
-  if (subDir) {
-    // Sanitize subDir to prevent path traversal
-    const sanitizedSubDir = subDir.replace(/[^\w\s-]/g, '_').replace(/\.{2,}/g, '_');
-    finalSavePath = path.join(savePath, sanitizedSubDir);
-    if (!fs.existsSync(finalSavePath)) {
-      fs.mkdirSync(finalSavePath, { recursive: true });
-    }
-  }
-
-  // Check Write Permissions
   try {
+    const metadata = await fetchMetadata(job.url);
+    context.update({ title: metadata.title || job.title, thumbnail: metadata.thumbnail || job.thumbnail });
+  } catch (error) {
+    const failure = classifyYtDlpFailure(error.message);
+    return { ok: false, errorMessage: error.message, engineFailure: error.engineFailure || failure.recoverable };
+  }
+  if (context.isCancelled()) return { ok: false, cancelled: true };
+
+  let finalSavePath = job.output_directory;
+  if (job.subdirectory) {
+    const sanitizedSubDir = job.subdirectory.replace(/[^\w\s-]/g, '_').replace(/\.{2,}/g, '_');
+    finalSavePath = path.join(finalSavePath, sanitizedSubDir);
+  }
+  try {
+    fs.mkdirSync(finalSavePath, { recursive: true });
     fs.accessSync(finalSavePath, fs.constants.W_OK);
-  } catch (err) {
-    logToFile(`Permission denied: ${finalSavePath}`);
-    event.sender.send('download-error', { id, message: `Quyền ghi bị từ chối: ${finalSavePath}` });
-    return;
+  } catch (error) {
+    return { ok: false, errorMessage: `Không thể ghi vào thư mục: ${finalSavePath}`, errorCategory: 'PERMANENT' };
   }
 
-  logToFile(`Download [${id}] to ${finalSavePath}`);
+  context.setState(JOB_STATES.DOWNLOADING);
   const args = [
     ...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath, ffmpeg: true }),
     '--output', path.join(finalSavePath, '%(title)s.%(ext)s'),
     '--no-part',
     '-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4', '--newline', '--progress',
-    '--no-simulate', '--print', `after_move:${FINAL_PATH_PREFIX}%(filepath)s`
+    '--progress-template', `download:${PROGRESS_PREFIX}%(progress._percent_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s`,
+    '--no-simulate', '--print', `after_move:${FINAL_PATH_PREFIX}%(filepath)s`,
+    job.url
   ];
-  args.push(url);
-
-  void executeWithRecovery({
-    operation: () => runDownloadAttempt(event, id, args),
+  const result = await executeWithRecovery({
+    operation: () => runManagedDownloadProcess(job, args, context),
     recover: performSafeUpdate,
     trigger: 'DOWNLOAD_FAILURE',
     logger: recoveryLogger
-  }).then(result => {
-    if (result.ok) {
-      const finalPath = result.stdout.split(/\r?\n/).map(extractFinalPath).filter(Boolean).pop();
-      if (finalPath && fs.existsSync(finalPath)) {
-        event.sender.send('download-complete', { id, path: finalPath });
-      } else {
-        logToFile(`yt-dlp did not report a valid final path for download ${id}`);
-        event.sender.send('download-error', { id, message: 'Downloaded file path was not reported or does not exist' });
-      }
-    } else {
-      const message = result.stderr.trim().split(/\r?\n/).pop() || result.error || `Process exited with code ${result.code}`;
-      logToFile(`Download ${id} failed: ${classifyYtDlpFailure(message).reason}`);
-      event.sender.send('download-error', { id, message });
-    }
-  }).catch(error => {
-    logToFile(`Download ${id} failed: internal_error`);
-    event.sender.send('download-error', { id, message: error.message });
   });
-});
+  if (!result.ok) {
+    if (context.isCancelled()) return { ok: false, cancelled: true };
+    const message = result.stderr?.trim().split(/\r?\n/).pop() || result.error || `Process exited with code ${result.code}`;
+    const engineRecoveryUsed = Boolean(result.recovery && result.recovery.update_status !== 'NOT_CHECKED');
+    return { ok: false, errorMessage: message, engineFailure: engineRecoveryUsed || classifyYtDlpFailure(message).recoverable };
+  }
+  const outputPath = result.stdout.split(/\r?\n/).map(extractFinalPath).filter(Boolean).pop();
+  return { ok: true, outputPath };
+}
+
+ipcMain.handle('enqueue-download-jobs', (event, jobs) => downloadManager.enqueueMany(jobs));
+ipcMain.handle('get-download-jobs', () => downloadManager?.list() || []);
+ipcMain.handle('cancel-download-job', (event, id) => downloadManager.cancel(id, 'user'));
+ipcMain.handle('retry-download-job', (event, id) => downloadManager.retry(id));
+ipcMain.handle('clear-download-jobs', (event, states) => downloadManager.clear(states));
 
 // Cookie Format Conversion (Netscape format)
 async function exportCookiesToNetscape() {
@@ -401,8 +421,21 @@ ipcMain.handle('get-default-path', () => currentSavePath || app.getPath('downloa
 app.whenReady().then(async () => {
   if (fs.existsSync(logPath)) fs.writeFileSync(logPath, '', 'utf8');
   if (await validateBinaries()) {
+    downloadManager = new DownloadManager({
+      jobsPath,
+      executor: executeDownloadJob,
+      maxConcurrent: MAX_CONCURRENT_DOWNLOADS,
+      logger: record => logToFile(`Download job: ${JSON.stringify(record)}`)
+    });
+    downloadManager.load();
+    downloadManager.on('jobs', jobs => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('download-jobs-updated', jobs);
+      }
+    });
     createTray();
     createWindow();
+    downloadManager.start();
     void periodicUpdateCheck({
       settings: getSettings(),
       saveSettings,

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stacher v7.1.8</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <!-- Custom Header Titlebar -->
+    <header>
+        <div class="menu-items">
+            <!-- File Menu -->
+            <div class="menu-item" id="menuFile">
+                File
+                <ul class="dropdown-menu">
+                    <li id="btnMinimizeTray"><i class="fas fa-download"></i> Minimize to Tray</li>
+                    <li id="btnQuit"><i class="fas fa-power-off"></i> Quit</li>
+                </ul>
+            </div>
+            
+            <!-- Downloads Menu -->
+            <div class="menu-item" id="menuDownloads">
+                Downloads
+                <ul class="dropdown-menu">
+                    <div class="divider"></div>
+                    <li id="btnClearCompleted"><i class="fas fa-broom"></i> Clear Completed</li>
+                    <li id="btnClearFailed"><i class="fas fa-eraser"></i> Clear Failed</li>
+                    <div class="divider"></div>
+                    <li id="btnCancelAll" class="danger"><i class="fas fa-stop-circle"></i> Cancel All</li>
+                </ul>
+            </div>
+
+            <div class="menu-item">Language</div>
+
+            <!-- Tools Menu -->
+            <div class="menu-item active" id="menuTools">
+                Tools
+                <ul class="dropdown-menu">
+                    <li id="btnOpenHome"><i class="fas fa-folder-open"></i> Open Home Directory</li>
+                    <div class="divider"></div>
+                    <li id="btnUpdateEngine"><i class="fas fa-sync-alt"></i> Update yt-dlp</li>
+                    <div class="divider"></div>
+                    <li id="btnFfmpegWeb"><i class="fas fa-external-link-alt"></i> Install FFmpeg (web)</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="window-controls">
+            <div id="btnLogin" class="control-icon" title="Login YouTube"><i class="fas fa-user-circle"></i></div>
+            <div id="winMinimize" class="control-icon"><i class="far fa-window-minimize mt-[-4px]"></i></div>
+            <div id="winMaximize" class="control-icon"><i class="far fa-window-maximize"></i></div>
+            <div id="winClose" class="control-icon close"><i class="fas fa-times"></i></div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main>
+        <div class="search-section">
+            <div class="search-bar">
+                <i class="far fa-link search-icon"></i>
+                <textarea id="urlInput" class="search-input" placeholder="Paste links here (one per line) and press enter to stache them!"></textarea>
+                <div id="btnLoginURL" class="search-action" title="Login YouTube"><i class="fas fa-user-circle"></i></div>
+                <div id="downloadBtn" class="download-btn">
+                    <i id="downloadIcon" class="fas fa-download"></i>
+                </div>
+            </div>
+            
+            <div id="storagePicker" class="storage-bar">
+                <i class="far fa-folder-open"></i>
+                <span id="currentPath">Loading path...</span>
+            </div>
+        </div>
+
+        <div id="downloadList" class="download-list hidden"></div>
+
+        <div id="welcomeArea" class="welcome-area">
+            <div class="mascot-container">
+                <img src="resources/mascot.png" alt="Mascot" class="mascot-image">
+            </div>
+            <button class="donate-btn">
+                <i class="fas fa-heart"></i> Click To Donate!
+            </button>
+            <div class="version-info">Stacher Version 7.1.8</div>
+            <a href="#" class="changelog-link" id="btnChangelog">
+                <i class="fas fa-globe"></i> Open change log
+            </a>
+        </div>
+    </main>
+
+    <!-- Playlist Modal -->
+    <div id="playlistModal" class="playlist-modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Playlist Results</div>
+                <div id="closeModal" class="close-modal"><i class="fas fa-times"></i></div>
+            </div>
+            <div class="modal-controls">
+                <label class="checkbox-container">
+                    <input type="checkbox" id="selectAll">
+                    <span class="checkmark"></span>
+                    Select All
+                </label>
+                <div class="flex-spacer"></div>
+                <button id="btnStartBatch" class="batch-btn">
+                    <i class="fas fa-download"></i> Download Selected
+                </button>
+            </div>
+            <div id="playlistItems" class="playlist-items">
+                <!-- Items will be injected here -->
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <div id="engineLabel" class="footer-center">
+            Downloading: 0 | Completed: 0
+        </div>
+    </footer>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

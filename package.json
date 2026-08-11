@@ -1,0 +1,44 @@
+{
+  "name": "ytd-pro-v5-stacher",
+  "version": "7.1.8",
+  "description": "Premium Stacher-inspired YouTube Downloader powered by Deno",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "dist": "electron-builder"
+  },
+  "keywords": [],
+  "author": "Antigravity",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.ytd.pro.v5",
+    "productName": "YTD Pro v5",
+    "directories": {
+      "output": "dist"
+    },
+    "extraResources": [
+      {
+        "from": "resources/bin/",
+        "to": "bin/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/mascot.png",
+        "to": "mascot.png"
+      }
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "requestedExecutionLevel": "requireAdministrator"
+    }
+  }
+}

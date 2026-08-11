@@ -41,8 +41,19 @@ async function initApp() {
     
     // Update UI
     if (currentPathText) currentPathText.innerText = currentSavePath;
+    updateEngineStatusView(await window.electronAPI.getEngineStatus());
     updateFooterStatus();
 }
+
+function updateEngineStatusView(status) {
+    if (!status) return;
+    const ytDlpVersion = document.getElementById('ytDlpVersion');
+    const denoVersion = document.getElementById('denoVersion');
+    if (ytDlpVersion) ytDlpVersion.innerText = `yt-dlp: ${status.yt_dlp_version || status.ytdlp_status}`;
+    if (denoVersion) denoVersion.innerText = `Deno: ${status.deno_version?.split(/\s+/)[1] || status.deno_status}`;
+}
+
+window.electronAPI.onEngineStatusUpdated(updateEngineStatusView);
 
 storagePicker?.addEventListener('click', async () => {
     const newPath = await window.electronAPI.selectFolder();
@@ -110,6 +121,19 @@ document.getElementById('btnUpdateEngine')?.addEventListener('click', async () =
             : `yt-dlp update ${result.update_status}: ${result.output}`);
     } catch (e) {
         alert('Update error: ' + e.message);
+    } finally {
+        btn.innerHTML = originalContent;
+    }
+});
+document.getElementById('btnRepairEngine')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btnRepairEngine');
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Repairing...';
+    try {
+        const result = await window.electronAPI.repairEngine();
+        alert(result.code === 0 ? 'Downloader repair completed.' : 'Repair failed: ' + result.output);
+    } catch (e) {
+        alert('Repair error: ' + e.message);
     } finally {
         btn.innerHTML = originalContent;
     }

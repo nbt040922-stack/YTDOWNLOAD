@@ -5,14 +5,22 @@ const { spawn } = require('child_process');
 const {
   FINAL_PATH_PREFIX,
   buildYtDlpBaseArgs,
+  classifyYtDlpFailure,
+  executeWithRecovery,
   extractFinalPath,
+  periodicUpdateCheck,
+  repairYtDlp,
   resolveBinaryPaths,
   runEngineDiagnostics,
-  updateYtDlp
+  runProcess,
+  safeUpdateYtDlp,
+  updateLogRecord
 } = require('./engine-runtime');
 
 let mainWindow;
 let tray = null;
+let latestDiagnostics = null;
+let updateInFlight = null;
 const activeProcesses = new Map();
 
 // Dynamic Binary Path Resolver
@@ -42,9 +50,12 @@ function getSettings() {
 
 function saveSettings(settings) {
   try {
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+    const merged = { ...getSettings(), ...settings };
+    fs.writeFileSync(settingsPath, JSON.stringify(merged, null, 2), 'utf8');
+    return merged;
   } catch (e) {
     logToFile('Error saving settings.json: ' + e.message);
+    return settings;
   }
 }
 
@@ -60,6 +71,7 @@ function logToFile(message) {
 // Verification & Startup
 async function validateBinaries() {
   const diagnostics = await runEngineDiagnostics(binaryPaths, spawnEnv);
+  latestDiagnostics = diagnostics;
   logToFile('Engine diagnostics: ' + JSON.stringify(diagnostics));
   const failures = ['ytdlp', 'deno', 'ffmpeg'].filter(name => diagnostics[`${name}_status`] !== 'ok');
   if (failures.length) {
@@ -68,6 +80,28 @@ async function validateBinaries() {
     return false;
   }
   return true;
+}
+
+function logUpdateResult(result) {
+  logToFile('yt-dlp update: ' + JSON.stringify(updateLogRecord(result)));
+}
+
+function notifyEngineStatus() {
+  if (mainWindow && !mainWindow.isDestroyed() && latestDiagnostics) {
+    mainWindow.webContents.send('engine-status-updated', latestDiagnostics);
+  }
+}
+
+function performSafeUpdate(trigger) {
+  if (!updateInFlight) {
+    updateInFlight = safeUpdateYtDlp(binaryPaths, { env: spawnEnv, trigger })
+      .finally(() => { updateInFlight = null; });
+  }
+  return updateInFlight;
+}
+
+function recoveryLogger(record) {
+  logToFile('Auto-recovery: ' + JSON.stringify(record));
 }
 
 function ensureBinaryExists(filePath) {
@@ -130,10 +164,22 @@ ipcMain.handle('open-external', (event, url) => shell.openExternal(url));
 
 ipcMain.handle('update-engine', async () => {
   logToFile('Checking for engine updates...');
-  const result = await updateYtDlp(binaryPaths, spawnEnv);
-  logToFile(`yt-dlp update: ${JSON.stringify(result)}`);
+  const result = await performSafeUpdate('MANUAL');
+  logUpdateResult(result);
+  latestDiagnostics = await runEngineDiagnostics(binaryPaths, spawnEnv);
+  notifyEngineStatus();
   return result;
 });
+
+ipcMain.handle('repair-engine', async () => {
+  const result = await repairYtDlp(binaryPaths, { env: spawnEnv });
+  logUpdateResult(result);
+  latestDiagnostics = result.diagnostics;
+  notifyEngineStatus();
+  return result;
+});
+
+ipcMain.handle('get-engine-status', () => latestDiagnostics);
 
 ipcMain.on('cancel-all-downloads', () => {
   logToFile(`Cancelling all downloads: ${activeProcesses.size} active tasks.`);
@@ -146,25 +192,21 @@ ipcMain.handle('get-metadata', async (event, url) => {
 
   const args = [...buildYtDlpBaseArgs({ paths: binaryPaths, cookiesPath }), '--dump-json'];
   args.push(url);
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(ytdlpPath, args, { env: spawnEnv });
-    let stdout = '';
-    let stderr = '';
-    
-    child.stdout.on('data', d => stdout += d.toString());
-    child.stderr.on('data', d => stderr += d.toString());
-    
-    child.on('close', code => {
-      if (code === 0) {
-        try { resolve(JSON.parse(stdout)); } catch(e) { reject(new Error('Parse error: ' + stdout)); }
-      } else {
-        const errorMsg = stderr || 'Unknown error occurred';
-        logToFile(`Metadata fetch failed: ${errorMsg}`);
-        reject(new Error(errorMsg));
-      }
-    });
+  const result = await executeWithRecovery({
+    operation: () => runProcess(ytdlpPath, args, { env: spawnEnv, timeoutMs: 0 }),
+    recover: performSafeUpdate,
+    trigger: 'METADATA_FAILURE',
+    logger: recoveryLogger
   });
+  if (!result.ok) {
+    const errorMsg = result.stderr || result.error || 'Unknown error occurred';
+    logToFile(`Metadata fetch failed: ${classifyYtDlpFailure(errorMsg).reason}`);
+    throw new Error(errorMsg);
+  }
+  try { return JSON.parse(result.stdout); } catch(e) {
+    logToFile('Metadata parse failed: ' + e.message);
+    throw new Error('Metadata parse error');
+  }
 });
 
 ipcMain.handle('get-playlist-data', async (event, url) => {
@@ -183,42 +225,62 @@ ipcMain.handle('get-playlist-data', async (event, url) => {
   
   args.push(url);
 
-  return new Promise((resolve, reject) => {
-    const child = spawn(ytdlpPath, args, { env: spawnEnv });
+  const result = await executeWithRecovery({
+    operation: () => runProcess(ytdlpPath, args, { env: spawnEnv, timeoutMs: 0 }),
+    recover: performSafeUpdate,
+    trigger: 'PLAYLIST_FAILURE',
+    logger: recoveryLogger
+  });
+  if (!result.ok) {
+    const errorMsg = result.stderr || result.error || 'Unknown error occurred';
+    logToFile(`Playlist fetch failed: ${classifyYtDlpFailure(errorMsg).reason}`);
+    throw new Error(errorMsg);
+  }
+  try {
+    return result.stdout.trim().split('\n').map(line => {
+      const data = JSON.parse(line);
+      return {
+        id: data.id,
+        title: data.title,
+        url: data.url || `https://www.youtube.com/watch?v=${data.id}`,
+        duration: data.duration,
+        thumbnail: data.thumbnails ? data.thumbnails[0].url : (data.thumbnail || ''),
+        uploader: data.uploader || 'YouTube'
+      };
+    });
+  } catch(e) {
+    logToFile('Parse error in get-playlist-data: ' + e.message);
+    throw new Error('Playlist metadata parse error');
+  }
+});
+
+function runDownloadAttempt(event, id, args) {
+  return new Promise((resolve) => {
+    const subprocess = spawn(ytdlpPath, args, { env: spawnEnv, windowsHide: true });
+    activeProcesses.set(id, subprocess);
     let stdout = '';
     let stderr = '';
-    
-    child.stdout.on('data', d => stdout += d.toString());
-    child.stderr.on('data', d => stderr += d.toString());
-    
-    child.on('close', code => {
-      if (code === 0) {
-        try {
-          const lines = stdout.trim().split('\n');
-          const results = lines.map(line => {
-            const data = JSON.parse(line);
-            return {
-              id: data.id,
-              title: data.title,
-              url: data.url || `https://www.youtube.com/watch?v=${data.id}`,
-              duration: data.duration,
-              thumbnail: data.thumbnails ? data.thumbnails[0].url : (data.thumbnail || ''),
-              uploader: data.uploader || 'YouTube'
-            };
-          });
-          resolve(results);
-        } catch(e) { 
-          logToFile('Parse error in get-playlist-data: ' + e.message);
-          reject(new Error('Parse error: ' + stdout.substring(0, 500))); 
-        }
-      } else {
-        const errorMsg = stderr || 'Unknown error occurred';
-        logToFile(`Playlist fetch failed: ${errorMsg}`);
-        reject(new Error(errorMsg));
-      }
+    let settled = false;
+    const finish = result => {
+      if (settled) return;
+      settled = true;
+      activeProcesses.delete(id);
+      resolve({ stdout, stderr, ...result });
+    };
+
+    subprocess.stdout.on('data', (data) => {
+      const line = data.toString();
+      stdout += line;
+      const percentMatch = line.match(/\[download\]\s+(\d+\.?\d*)%/);
+      const speedMatch = line.match(/at\s+([\d\.]+\w+\/s)/);
+      if (percentMatch) event.sender.send('download-progress', { id, value: parseFloat(percentMatch[1]) });
+      if (speedMatch) event.sender.send('download-speed', { id, value: speedMatch[1] });
     });
+    subprocess.stderr.on('data', data => { stderr += data.toString(); });
+    subprocess.on('error', error => finish({ ok: false, code: null, error: error.message }));
+    subprocess.on('close', code => finish({ ok: code === 0, code, error: code === 0 ? null : `Process exited with code ${code}` }));
   });
-});
+}
 
 ipcMain.on('download-video', (event, { id, url, savePath, subDir }) => {
   if (!ensureBinaryExists(ytdlpPath)) {
@@ -255,25 +317,14 @@ ipcMain.on('download-video', (event, { id, url, savePath, subDir }) => {
   ];
   args.push(url);
 
-  const subprocess = spawn(ytdlpPath, args, { env: spawnEnv });
-  activeProcesses.set(id, subprocess);
-  let stdout = '';
-  let stderr = '';
-
-  subprocess.stdout.on('data', (data) => {
-    const line = data.toString();
-    stdout += line;
-    const percentMatch = line.match(/\[download\]\s+(\d+\.?\d*)%/);
-    const speedMatch = line.match(/at\s+([\d\.]+\w+\/s)/);
-    if (percentMatch) event.sender.send('download-progress', { id, value: parseFloat(percentMatch[1]) });
-    if (speedMatch) event.sender.send('download-speed', { id, value: speedMatch[1] });
-  });
-  subprocess.stderr.on('data', data => { stderr += data.toString(); });
-
-  subprocess.on('close', (code) => {
-    activeProcesses.delete(id);
-    if (code === 0) {
-      const finalPath = stdout.split(/\r?\n/).map(extractFinalPath).filter(Boolean).pop();
+  void executeWithRecovery({
+    operation: () => runDownloadAttempt(event, id, args),
+    recover: performSafeUpdate,
+    trigger: 'DOWNLOAD_FAILURE',
+    logger: recoveryLogger
+  }).then(result => {
+    if (result.ok) {
+      const finalPath = result.stdout.split(/\r?\n/).map(extractFinalPath).filter(Boolean).pop();
       if (finalPath && fs.existsSync(finalPath)) {
         event.sender.send('download-complete', { id, path: finalPath });
       } else {
@@ -281,10 +332,13 @@ ipcMain.on('download-video', (event, { id, url, savePath, subDir }) => {
         event.sender.send('download-error', { id, message: 'Downloaded file path was not reported or does not exist' });
       }
     } else {
-      const message = stderr.trim().split(/\r?\n/).pop() || `Process exited with code ${code}`;
-      logToFile(`Download ${id} failed: ${message}`);
+      const message = result.stderr.trim().split(/\r?\n/).pop() || result.error || `Process exited with code ${result.code}`;
+      logToFile(`Download ${id} failed: ${classifyYtDlpFailure(message).reason}`);
       event.sender.send('download-error', { id, message });
     }
+  }).catch(error => {
+    logToFile(`Download ${id} failed: internal_error`);
+    event.sender.send('download-error', { id, message: error.message });
   });
 });
 
@@ -349,6 +403,20 @@ app.whenReady().then(async () => {
   if (await validateBinaries()) {
     createTray();
     createWindow();
+    void periodicUpdateCheck({
+      settings: getSettings(),
+      saveSettings,
+      paths: binaryPaths,
+      update: (paths, { trigger }) => performSafeUpdate(trigger)
+    }).then(async result => {
+      logUpdateResult(result);
+      if (result.update_status !== 'NOT_CHECKED') {
+        latestDiagnostics = await runEngineDiagnostics(binaryPaths, spawnEnv);
+        notifyEngineStatus();
+      }
+    }).catch(() => {
+      logToFile('Periodic yt-dlp update: UPDATE_FAILED_USABLE');
+    });
   }
 });
 

@@ -95,6 +95,8 @@ header {
 .dropdown-menu li i { width: 16px; color: var(--text-secondary); font-size: 14px; text-align: center; }
 .dropdown-menu li.danger { color: var(--accent-danger); }
 .dropdown-menu li.danger i { color: var(--accent-danger); }
+.dropdown-menu li.engine-info { padding: 4px 16px; color: var(--text-secondary); pointer-events: none; }
+.dropdown-menu li.engine-info:hover { background: transparent; }
 
 .divider { height: 1px; background-color: var(--border-color); margin: 6px 0; }
 

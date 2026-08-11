@@ -6,6 +6,7 @@ const { DownloadManager, JOB_STATES, PROGRESS_PREFIX, parseYtDlpProgress } = req
 const { YouTubeAuthSession, isAuthRequired, redactSensitive } = require('./auth-session');
 const {
   FINAL_PATH_PREFIX,
+  bootstrapRuntime,
   buildYtDlpBaseArgs,
   classifyYtDlpFailure,
   executeWithRecovery,
@@ -31,7 +32,8 @@ const MAX_CONCURRENT_DOWNLOADS = 2;
 const binaryPaths = resolveBinaryPaths({
   isPackaged: app.isPackaged,
   resourcesPath: process.resourcesPath,
-  appDir: __dirname
+  appDir: __dirname,
+  userDataPath: app.getPath('userData')
 });
 const { ytdlpPath } = binaryPaths;
 const legacyCookiesPath = path.join(app.getPath('userData'), 'cookies.txt');
@@ -79,8 +81,12 @@ async function validateBinaries() {
   latestDiagnostics = diagnostics;
   logToFile('Engine diagnostics: ' + JSON.stringify(diagnostics));
   const failures = ['ytdlp', 'deno', 'ffmpeg'].filter(name => diagnostics[`${name}_status`] !== 'ok');
-  if (failures.length) {
-    const details = failures.map(name => `${name}: ${diagnostics[`${name}_status`]} (${diagnostics.errors[name] || 'unknown error'})`);
+  const fallbackFailures = ['ytdlp', 'deno', 'ffmpeg'].filter(name => diagnostics[`fallback_${name}_status`] !== 'ok');
+  if (failures.length || fallbackFailures.length) {
+    const details = [
+      ...failures.map(name => `runtime ${name}: ${diagnostics[`${name}_status`]} (${diagnostics.errors[name] || 'unknown error'})`),
+      ...fallbackFailures.map(name => `fallback ${name}: ${diagnostics[`fallback_${name}_status`]} (${diagnostics.fallback_errors[name] || 'unknown error'})`)
+    ];
     dialog.showErrorBox('System Check Failed', details.join('\n'));
     return false;
   }
@@ -393,6 +399,8 @@ ipcMain.handle('get-default-path', () => currentSavePath || app.getPath('downloa
 
 app.whenReady().then(async () => {
   if (fs.existsSync(logPath)) fs.writeFileSync(logPath, '', 'utf8');
+  const bootstrap = await bootstrapRuntime(binaryPaths, { run: runProcess, env: spawnEnv });
+  logToFile('Runtime bootstrap: ' + JSON.stringify(bootstrap));
   youtubeAuth = new YouTubeAuthSession({
     sessionFromPartition: partition => session.fromPartition(partition, { cache: true }),
     createBrowserWindow: options => new BrowserWindow({ ...options, parent: mainWindow || undefined }),

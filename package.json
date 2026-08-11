@@ -6,6 +6,8 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
+    "test:fresh-install": "powershell -ExecutionPolicy Bypass -File scripts/test-fresh-install.ps1",
+    "preflight": "node scripts/preflight.js",
     "build": "electron-builder",
     "dist": "electron-builder"
   },
@@ -22,10 +24,11 @@
     "directories": {
       "output": "dist"
     },
+    "beforePack": "./scripts/preflight.js",
     "extraResources": [
       {
-        "from": "resources/bin/",
-        "to": "bin/",
+        "from": "resources/bin/fallback/",
+        "to": "bin/fallback/",
         "filter": [
           "**/*"
         ]

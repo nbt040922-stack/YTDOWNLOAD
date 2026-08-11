@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { bootstrapRuntime, recoverRuntimeBinary } = require('./runtime-binaries');
 
 const FINAL_PATH_PREFIX = '__YTD_FINAL_PATH__:';
 const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -14,16 +15,25 @@ const UPDATE_STATES = Object.freeze({
   RECOVERY_FAILED: 'RECOVERY_FAILED'
 });
 
-function resolveBinaryPaths({ isPackaged, resourcesPath, appDir }) {
-  const binPath = isPackaged
-    ? path.join(resourcesPath, 'bin')
-    : path.join(appDir, 'resources', 'bin');
-
+function resolveBinaryPaths({ isPackaged, resourcesPath, appDir, userDataPath }) {
+  const fallbackDir = isPackaged
+    ? path.join(resourcesPath, 'bin', 'fallback')
+    : path.join(appDir, 'resources', 'bin', 'fallback');
+  const runtimeDir = userDataPath
+    ? path.join(userDataPath, 'runtime')
+    : path.join(appDir, 'resources', 'bin', 'runtime');
   return {
-    binPath,
-    ytdlpPath: path.join(binPath, 'yt-dlp.exe'),
-    ffmpegPath: path.join(binPath, 'ffmpeg.exe'),
-    denoPath: path.join(binPath, 'deno.exe')
+    binPath: runtimeDir,
+    runtimeDir,
+    fallbackDir,
+    ytdlpPath: path.join(runtimeDir, 'yt-dlp.exe'),
+    ffmpegPath: path.join(runtimeDir, 'ffmpeg.exe'),
+    denoPath: path.join(runtimeDir, 'deno.exe'),
+    ytdlpBackupPath: path.join(runtimeDir, 'yt-dlp.backup.exe'),
+    fallbackYtdlpPath: path.join(fallbackDir, 'yt-dlp.exe'),
+    fallbackFfmpegPath: path.join(fallbackDir, 'ffmpeg.exe'),
+    fallbackDenoPath: path.join(fallbackDir, 'deno.exe'),
+    bootstrapStatePath: path.join(runtimeDir, 'bootstrap-state.json')
   };
 }
 
@@ -78,30 +88,54 @@ function firstMatchingLine(text, pattern) {
 }
 
 async function runEngineDiagnostics(paths, env = process.env) {
-  const [ytDlp, deno, ffmpeg, encoders] = await Promise.all([
+  const [ytDlp, deno, ffmpeg, encoders, fallbackYtDlp, fallbackDeno, fallbackFfmpeg] = await Promise.all([
     runProcess(paths.ytdlpPath, ['--version'], { env }),
     runProcess(paths.denoPath, ['--version'], { env }),
     runProcess(paths.ffmpegPath, ['-version'], { env }),
-    runProcess(paths.ffmpegPath, ['-hide_banner', '-encoders'], { env })
+    runProcess(paths.ffmpegPath, ['-hide_banner', '-encoders'], { env }),
+    paths.fallbackYtdlpPath ? runProcess(paths.fallbackYtdlpPath, ['--version'], { env }) : Promise.resolve({ ok: false, error: 'Fallback path not configured' }),
+    paths.fallbackDenoPath ? runProcess(paths.fallbackDenoPath, ['--version'], { env }) : Promise.resolve({ ok: false, error: 'Fallback path not configured' }),
+    paths.fallbackFfmpegPath ? runProcess(paths.fallbackFfmpegPath, ['-version'], { env }) : Promise.resolve({ ok: false, error: 'Fallback path not configured' })
   ]);
 
   const status = (filePath, result) => !fs.existsSync(filePath) ? 'missing' : result.ok ? 'ok' : 'cannot_run';
   return {
+    runtime_ytdlp_path: paths.ytdlpPath,
+    fallback_ytdlp_path: paths.fallbackYtdlpPath || null,
+    runtime_ytdlp_version: ytDlp.ok ? firstMatchingLine(ytDlp.stdout, /\S/) : null,
+    fallback_ytdlp_version: fallbackYtDlp.ok ? firstMatchingLine(fallbackYtDlp.stdout, /\S/) : null,
     resolved_ytdlp_path: paths.ytdlpPath,
     yt_dlp_version: ytDlp.ok ? firstMatchingLine(ytDlp.stdout, /\S/) : null,
     ytdlp_status: status(paths.ytdlpPath, ytDlp),
+    fallback_ytdlp_status: paths.fallbackYtdlpPath ? status(paths.fallbackYtdlpPath, fallbackYtDlp) : 'not_configured',
+    runtime_deno_path: paths.denoPath,
+    fallback_deno_path: paths.fallbackDenoPath || null,
+    runtime_deno_version: deno.ok ? firstMatchingLine(deno.stdout, /^deno\s/i) : null,
+    fallback_deno_version: fallbackDeno.ok ? firstMatchingLine(fallbackDeno.stdout, /^deno\s/i) : null,
     resolved_deno_path: paths.denoPath,
     deno_version: deno.ok ? firstMatchingLine(deno.stdout, /^deno\s/i) : null,
     deno_status: status(paths.denoPath, deno),
+    fallback_deno_status: paths.fallbackDenoPath ? status(paths.fallbackDenoPath, fallbackDeno) : 'not_configured',
+    runtime_ffmpeg_path: paths.ffmpegPath,
+    fallback_ffmpeg_path: paths.fallbackFfmpegPath || null,
+    runtime_ffmpeg_version: ffmpeg.ok ? firstMatchingLine(`${ffmpeg.stdout}\n${ffmpeg.stderr}`, /^ffmpeg version\s/i) : null,
+    fallback_ffmpeg_version: fallbackFfmpeg.ok ? firstMatchingLine(`${fallbackFfmpeg.stdout}\n${fallbackFfmpeg.stderr}`, /^ffmpeg version\s/i) : null,
     resolved_ffmpeg_path: paths.ffmpegPath,
     ffmpeg_version: ffmpeg.ok ? firstMatchingLine(`${ffmpeg.stdout}\n${ffmpeg.stderr}`, /^ffmpeg version\s/i) : null,
     ffmpeg_status: status(paths.ffmpegPath, ffmpeg),
+    fallback_ffmpeg_status: paths.fallbackFfmpegPath ? status(paths.fallbackFfmpegPath, fallbackFfmpeg) : 'not_configured',
+    recovery_source: paths.recoverySources || { ytdlp: 'runtime', deno: 'runtime', ffmpeg: 'runtime' },
     js_runtime_available: deno.ok,
     h264_available: encoders.ok && /\b(?:libx264|h264_[a-z0-9_]+)\b/i.test(`${encoders.stdout}\n${encoders.stderr}`),
     errors: {
       ytdlp: ytDlp.ok ? null : ytDlp.error,
       deno: deno.ok ? null : deno.error,
       ffmpeg: ffmpeg.ok ? null : ffmpeg.error
+    },
+    fallback_errors: {
+      ytdlp: fallbackYtDlp.ok ? null : fallbackYtDlp.error,
+      deno: fallbackDeno.ok ? null : fallbackDeno.error,
+      ffmpeg: fallbackFfmpeg.ok ? null : fallbackFfmpeg.error
     }
   };
 }
@@ -141,7 +175,7 @@ async function safeUpdateYtDlp(paths, {
   run = runProcess,
   fileSystem = fs
 } = {}) {
-  const backupPath = path.join(path.dirname(paths.ytdlpPath), 'yt-dlp.backup.exe');
+  const backupPath = paths.ytdlpBackupPath || path.join(path.dirname(paths.ytdlpPath), 'yt-dlp.backup.exe');
   const base = {
     old_version: null,
     new_version: null,
@@ -169,19 +203,34 @@ async function safeUpdateYtDlp(paths, {
   base.new_version = after.ok ? firstMatchingLine(after.stdout, /\S/) : null;
 
   if (!after.ok || !deno.ok) {
-    try {
-      fileSystem.copyFileSync(backupPath, paths.ytdlpPath);
-      base.rollback_performed = true;
-    } catch (error) {
-      return { ...base, code: 1, usable: false, update_status: UPDATE_STATES.RECOVERY_FAILED, output: error.message };
+    let restored = null;
+    for (const candidate of [
+      { source: 'backup', filePath: backupPath },
+      { source: 'fallback', filePath: paths.fallbackYtdlpPath }
+    ]) {
+      if (!candidate.filePath || (fileSystem.existsSync && !fileSystem.existsSync(candidate.filePath))) continue;
+      const candidateProbe = await run(candidate.filePath, ['--version'], { env });
+      if (!candidateProbe.ok) continue;
+      try {
+        fileSystem.copyFileSync(candidate.filePath, paths.ytdlpPath);
+      } catch (_) {
+        continue;
+      }
+      const verification = await run(paths.ytdlpPath, ['--version'], { env });
+      if (verification.ok) {
+        restored = { source: candidate.source, result: verification };
+        break;
+      }
     }
-    const restored = await run(paths.ytdlpPath, ['--version'], { env });
+    base.rollback_performed = Boolean(restored);
+    const usable = Boolean(restored) && deno.ok;
     return {
       ...base,
       code: 1,
-      usable: restored.ok,
-      new_version: restored.ok ? firstMatchingLine(restored.stdout, /\S/) : null,
-      update_status: restored.ok ? UPDATE_STATES.UPDATE_FAILED_ROLLED_BACK : UPDATE_STATES.RECOVERY_FAILED,
+      usable,
+      new_version: restored ? firstMatchingLine(restored.result.stdout, /\S/) : null,
+      recovery_source: restored?.source || null,
+      update_status: usable ? UPDATE_STATES.UPDATE_FAILED_ROLLED_BACK : UPDATE_STATES.RECOVERY_FAILED,
       output: [update.stderr, update.error, after.error, deno.error].filter(Boolean).join('\n')
     };
   }
@@ -204,32 +253,34 @@ async function repairYtDlp(paths, {
   diagnose = runEngineDiagnostics,
   fileSystem = fs
 } = {}) {
-  const backupPath = path.join(path.dirname(paths.ytdlpPath), 'yt-dlp.backup.exe');
   const before = await diagnose(paths, env);
-  let rollbackPerformed = false;
-  let oldVersion = before.yt_dlp_version;
-
-  if (before.ytdlp_status !== 'ok' && fileSystem.existsSync(backupPath)) {
-    try {
-      fileSystem.copyFileSync(backupPath, paths.ytdlpPath);
-      rollbackPerformed = true;
-      await run(paths.ytdlpPath, ['--version'], { env });
-    } catch (_) {}
+  const repairs = {};
+  for (const name of ['ytdlp', 'deno', 'ffmpeg']) {
+    if (before[`${name}_status`] === 'ok') {
+      repairs[name] = 'runtime';
+      continue;
+    }
+    const recovery = await recoverRuntimeBinary(name, paths, { env, run, fileSystem });
+    repairs[name] = recovery.source;
   }
-
+  paths.recoverySources = repairs;
   const diagnostics = await diagnose(paths, env);
   const usable = ['ytdlp', 'deno', 'ffmpeg'].every(name => diagnostics[`${name}_status`] === 'ok');
+  const repaired = Object.entries(repairs).filter(([, source]) => source && source !== 'runtime').map(([name, source]) => `${name}:${source}`);
   return {
     code: usable ? 0 : 1,
     usable,
     update_status: usable ? UPDATE_STATES.RECOVERY_SUCCESS : UPDATE_STATES.RECOVERY_FAILED,
-    old_version: oldVersion,
+    old_version: before.yt_dlp_version,
     new_version: diagnostics.yt_dlp_version,
     update_trigger: 'REPAIR',
     recovery_retry: false,
-    rollback_performed: rollbackPerformed,
+    rollback_performed: repairs.ytdlp === 'backup',
+    recovery_sources: repairs,
     diagnostics,
-    output: usable ? 'Downloader engines are usable' : 'One or more downloader engines are unusable'
+    output: usable
+      ? repaired.length ? `Repaired ${repaired.join(', ')}` : 'Runtime healthy'
+      : 'One or more downloader engines are unusable'
   };
 }
 
@@ -304,6 +355,7 @@ module.exports = {
   FINAL_PATH_PREFIX,
   UPDATE_INTERVAL_MS,
   UPDATE_STATES,
+  bootstrapRuntime,
   buildYtDlpBaseArgs,
   classifyYtDlpFailure,
   executeWithRecovery,

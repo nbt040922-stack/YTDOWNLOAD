@@ -112,6 +112,7 @@ test('broken updated binary rolls back', async () => {
   const run = async (executable, args) => {
     if (args[0] === '--update') { broken = true; return { ok: true, stdout: 'updated' }; }
     if (executable === paths.denoPath) return { ok: true, stdout: 'deno 2' };
+    if (executable.endsWith('yt-dlp.backup.exe')) return { ok: true, stdout: '1' };
     return broken ? { ok: false, error: 'broken' } : { ok: true, stdout: '1' };
   };
   const result = await safeUpdateYtDlp(paths, { run, fileSystem, trigger: 'TEST' });
@@ -143,15 +144,19 @@ test('successful update keeps the new binary', async () => {
 test('manual Repair restores a usable backup', async () => {
   let diagnoses = 0;
   let restored = false;
+  const backupPath = path.join(path.dirname(paths.ytdlpPath), 'yt-dlp.backup.exe');
   const diagnose = async () => ++diagnoses === 1
     ? { ytdlp_status: 'cannot_run', yt_dlp_version: null, deno_status: 'ok', ffmpeg_status: 'ok' }
     : { ytdlp_status: 'ok', yt_dlp_version: '1', deno_status: 'ok', ffmpeg_status: 'ok' };
   const result = await repairYtDlp(paths, {
     diagnose,
-    run: async () => ({ ok: true, stdout: '1' }),
+    run: async executable => executable === paths.ytdlpPath && !restored
+      ? { ok: false, error: 'broken' }
+      : { ok: true, stdout: '1' },
     fileSystem: {
-      existsSync: () => true,
-      copyFileSync: () => { restored = true; }
+      existsSync: filePath => filePath === paths.ytdlpPath || filePath === backupPath,
+      mkdirSync: () => {},
+      copyFileSync: source => { if (source === backupPath) restored = true; }
     }
   });
   assert.equal(restored, true);

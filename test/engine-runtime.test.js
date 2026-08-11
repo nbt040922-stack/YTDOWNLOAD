@@ -34,7 +34,12 @@ test('final path reporting preserves Unicode exactly', () => {
 });
 
 test('bundled engines execute successfully', async () => {
-  const diagnostics = await runEngineDiagnostics(paths);
+  const diagnostics = await runEngineDiagnostics({
+    ...paths,
+    ytdlpPath: paths.fallbackYtdlpPath,
+    denoPath: paths.fallbackDenoPath,
+    ffmpegPath: paths.fallbackFfmpegPath
+  });
   assert.equal(diagnostics.ytdlp_status, 'ok');
   assert.equal(diagnostics.deno_status, 'ok');
   assert.equal(diagnostics.ffmpeg_status, 'ok');

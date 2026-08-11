@@ -1,6 +1,6 @@
 # Phase 1 Stability Hardening Report
 
-Date: 2026-08-11  
+Date: 2026-08-11
 Scope: downloader runtime stability only; no UI redesign or Phase 2 work.
 
 ## Files changed

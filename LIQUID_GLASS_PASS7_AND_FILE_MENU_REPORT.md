@@ -82,7 +82,7 @@ The File menu now contains, in order:
 
 - Command: `npm test`
 - Result: **57 passed, 0 failed**
-- Duration: **1741.9255 ms**
+- Duration: **2288.6442 ms**
 - `git diff --check`: passed.
 
 Pass 7 ends here. No further UI pass was started.

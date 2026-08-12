@@ -7,9 +7,12 @@
 - `preload.js`
 - `main.js`
 - `style.css`
+- `package.json`
 - `LIQUID_GLASS_PASS7_AND_FILE_MENU_REPORT.md`
 
 No downloader, yt-dlp, Deno, FFmpeg, DownloadManager, queue, authentication, recovery, or application-state logic changed.
+
+The package file now excludes existing `dist*` and `release-*` output directories from the broad application file glob. This prevents prior build artifacts from being embedded into later portable builds.
 
 ## File menu changes
 

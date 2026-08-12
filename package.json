@@ -30,7 +30,10 @@
       "!resources/bin{,/**/*}",
       "!test{,/**/*}",
       "!scripts{,/**/*}",
-      "!PHASE*.md"
+      "!PHASE*.md",
+      "!dist{,/**/*}",
+      "!dist-*{,/**/*}",
+      "!release-*{,/**/*}"
     ],
     "extraResources": [
       {

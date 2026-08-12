@@ -56,6 +56,27 @@ test('POST adapter enqueues once and preserves manual enqueue path', () => {
   assert.equal(manager.enqueue({ url: 'https://youtu.be/manual12345', output_directory: 'D:\\Manual' }).added, true);
 });
 
+test('failed enqueue rolls back handoff so POST retry can succeed', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'contentops-'));
+  const { bridge, manager } = setup(root);
+  const enqueue = manager.enqueue.bind(manager);
+  let attempts = 0;
+  manager.enqueue = input => {
+    if (++attempts === 1) throw new Error('enqueue failed');
+    return enqueue(input);
+  };
+  const address = await bridge.start();
+  const failed = await httpJson('POST', address.port, '/api/download-jobs', request());
+  const retried = await httpJson('POST', address.port, '/api/download-jobs', request());
+  assert.equal(failed.status, 400);
+  assert.equal(retried.status, 201);
+  assert.equal(retried.body.external_id, 'contentops-123');
+  assert.equal(manager.list().length, 1);
+  assert.equal(bridge.records.size, 1);
+  assert.equal(bridge.get('contentops-123').manager_job_id, manager.list()[0].id);
+  await bridge.stop();
+});
+
 test('invalid request is rejected', () => {
   assert.throws(() => validateRequest(request({ video_url: 'https://example.com/video' })), /Invalid video_url/);
   assert.throws(() => validateRequest(request({ video_url: 'https://www.youtube.com/watch?v=wrongvideo1' })), /Invalid video_url/);
@@ -81,6 +102,16 @@ test('restart restores active handoff without changing external id', () => {
   second.bridge.restore();
   assert.equal(second.bridge.submit(request()).job.external_id, externalId);
   assert.equal(second.manager.list().length, 1);
+});
+
+test('restore removes active mapping when re-enqueue fails', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'contentops-'));
+  setup(root).bridge.submit(request());
+  const { bridge } = setup(root);
+  bridge.manager.enqueue = () => { throw new Error('enqueue failed'); };
+  bridge.restore();
+  assert.equal(bridge.records.size, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'handoffs.json'), 'utf8')), []);
 });
 
 test('localhost bridge lifecycle is clean', async () => {

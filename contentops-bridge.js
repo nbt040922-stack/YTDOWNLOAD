@@ -64,16 +64,23 @@ class ContentOpsBridge {
     record.manager_job_id = result.job.id;
     record.state = result.job.state;
     record.updated_at = new Date().toISOString();
-    this._save();
     return record;
   }
 
   restore() {
     const jobs = this.manager.list();
-    for (const record of this.records.values()) {
+    let changed = false;
+    for (const [handoffId, record] of this.records) {
       if (!ACTIVE_STATES.has(record.state)) continue;
-      if (!jobs.some(job => job.id === record.manager_job_id)) this._enqueue(record);
+      if (jobs.some(job => job.id === record.manager_job_id)) continue;
+      try {
+        this._enqueue(record);
+      } catch (_) {
+        this.records.delete(handoffId);
+      }
+      changed = true;
     }
+    if (changed) this._save();
     this._sync(this.manager.list());
   }
 
@@ -94,8 +101,9 @@ class ContentOpsBridge {
       created_at: now,
       updated_at: now
     };
-    this.records.set(request.handoff_id, record);
     this._enqueue(record);
+    this.records.set(request.handoff_id, record);
+    this._save();
     return { created: true, job: { ...record } };
   }
 

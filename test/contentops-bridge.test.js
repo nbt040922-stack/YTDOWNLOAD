@@ -31,6 +31,13 @@ function setup(root, executor = async () => ({ ok: true, outputPath: 'D:\\Conten
   return { bridge, manager };
 }
 
+test('bridge rejects non-loopback bind', () => {
+  assert.throws(
+    () => new ContentOpsBridge({ manager: {}, recordsPath: 'unused', host: '0.0.0.0' }),
+    /must bind to 127\.0\.0\.1/
+  );
+});
+
 function httpJson(method, port, route, payload) {
   return new Promise((resolve, reject) => {
     const body = payload ? JSON.stringify(payload) : '';

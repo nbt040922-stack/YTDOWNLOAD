@@ -44,6 +44,7 @@ const logPath = path.join(app.getPath('userData'), 'app_debug.log');
 const jobsPath = path.join(app.getPath('userData'), 'download-jobs.json');
 const contentOpsRecordsPath = path.join(app.getPath('userData'), 'contentops-handoffs.json');
 const contentOpsBridgePort = Number.parseInt(process.env.CONTENTOPS_BRIDGE_PORT || '8790', 10);
+const contentOpsHeadless = process.env.CONTENTOPS_HEADLESS === '1';
 
 const spawnEnv = { ...process.env };
 
@@ -144,7 +145,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => { if (!contentOpsHeadless) mainWindow.show(); });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 

@@ -1,9 +1,9 @@
 :root {
-  --bg-main: #e4e7eb;
-  --bg-panel: rgba(255, 255, 255, 0.24);
-  --bg-card: rgba(255, 255, 255, 0.36);
-  --bg-input: rgba(255, 255, 255, 0.4);
-  --bg-menu: rgba(255, 255, 255, 0.54);
+  --bg-main: #e1e5e9;
+  --bg-panel: rgba(255, 255, 255, 0.2);
+  --bg-card: rgba(255, 255, 255, 0.31);
+  --bg-input: rgba(255, 255, 255, 0.35);
+  --bg-menu: rgba(255, 255, 255, 0.5);
   --text-primary: #1d1d1f;
   --text-secondary: #6e7378;
   --text-muted: #989da3;
@@ -32,7 +32,7 @@ body {
     radial-gradient(circle at 12% 8%, rgba(165, 226, 241, 0.2), rgba(255, 255, 255, 0) 42%),
     radial-gradient(circle at 84% 22%, rgba(211, 188, 242, 0.18), rgba(247, 196, 222, 0.08) 22%, rgba(255, 255, 255, 0) 48%),
     radial-gradient(circle at 65% 92%, rgba(250, 207, 177, 0.16), rgba(255, 255, 255, 0) 43%),
-    linear-gradient(145deg, #e7eaed 0%, var(--bg-main) 55%, #e1e4e8 100%);
+    linear-gradient(145deg, #e4e8eb 0%, var(--bg-main) 55%, #dde1e6 100%);
   color: var(--text-primary);
   height: 100vh;
   display: flex;
@@ -50,7 +50,7 @@ header {
   -webkit-app-region: drag;
   font-size: 13px;
   border-bottom: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.23);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
   box-shadow: 0 4px 14px rgba(30, 40, 55, 0.065), inset 0 -1px rgba(255, 255, 255, 0.42);
@@ -69,8 +69,8 @@ header {
   transition: background var(--motion-fast), color var(--motion-fast);
 }
 
-.menu-item:hover { background: rgba(255, 255, 255, 0.3); box-shadow: var(--glass-inset); }
-.menu-item.active { color: var(--text-primary); background: rgba(255, 255, 255, 0.4); box-shadow: var(--glass-inset), 0 2px 7px rgba(35, 45, 60, 0.045); }
+.menu-item:hover { background: rgba(255, 255, 255, 0.26); box-shadow: var(--glass-inset); }
+.menu-item.active { color: var(--text-primary); background: rgba(255, 255, 255, 0.34); box-shadow: var(--glass-inset), 0 2px 6px rgba(35, 45, 60, 0.04); }
 
 /* Dropdown Menu (Glassmorphism) */
 .dropdown-menu {
@@ -121,25 +121,24 @@ header {
 /* Main Content */
 main { flex: 1; display: flex; flex-direction: column; padding: 16px 24px; gap: 16px; overflow-y: auto; }
 .search-section { width: 100%; max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
-.search-bar { min-height: 60px; height: auto; position: relative; isolation: isolate; overflow: hidden; background: var(--bg-input); border: 1px solid rgba(255, 255, 255, 0.94); border-radius: 27px; display: flex; align-items: flex-start; padding: 12px 17px 12px 24px; gap: 8px; -webkit-backdrop-filter: blur(36px) saturate(175%); backdrop-filter: blur(36px) saturate(175%); box-shadow: 0 14px 32px rgba(30, 40, 55, 0.085), 0 3px 8px rgba(30, 40, 55, 0.05), inset 1px 1px 0 #fff, inset -1px -1px 0 rgba(40, 50, 60, 0.05); transition: border-color var(--motion-fast), box-shadow var(--motion-fast), background var(--motion-fast); }
-.search-bar::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.07) 48%, rgba(40, 50, 60, 0.035)); opacity: 0.28; }
-.search-bar:hover { box-shadow: 0 15px 34px rgba(30, 40, 55, 0.09), 0 3px 8px rgba(30, 40, 55, 0.055), inset 1px 1px 0 #fff, inset -1px -1px 0 rgba(40, 50, 60, 0.05); }
-.search-bar:focus-within { border-color: #fff; background: rgba(255, 255, 255, 0.44); box-shadow: 0 16px 36px rgba(30, 40, 55, 0.095), 0 3px 8px rgba(30, 40, 55, 0.055), inset 1px 1px 0 #fff, inset -1px -1px 0 rgba(40, 50, 60, 0.05); }
+.search-bar { min-height: 60px; height: auto; position: relative; isolation: isolate; overflow: hidden; background: var(--bg-input); border: 1px solid rgba(255, 255, 255, 0.92); border-radius: 27px; display: flex; align-items: flex-start; padding: 12px 17px 12px 24px; gap: 8px; -webkit-backdrop-filter: blur(36px) saturate(175%); backdrop-filter: blur(36px) saturate(175%); box-shadow: 0 12px 28px rgba(30, 40, 55, 0.08), 0 2px 6px rgba(30, 40, 55, 0.05), inset 1px 1px 0 #fff, inset -1px -1px 0 rgba(40, 50, 60, 0.055); transition: border-color var(--motion-fast), box-shadow var(--motion-fast), background var(--motion-fast); }
+.search-bar::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(135deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.05) 48%, rgba(40, 50, 60, 0.04)); opacity: 0.24; }
+.search-bar:hover { box-shadow: 0 13px 29px rgba(30, 40, 55, 0.085), 0 2px 6px rgba(30, 40, 55, 0.055), inset 1px 1px 0 #fff, inset -1px -1px 0 rgba(40, 50, 60, 0.055); }
+.search-bar:focus-within { border-color: #fff; background: rgba(255, 255, 255, 0.38); box-shadow: 0 14px 30px rgba(30, 40, 55, 0.09), 0 2px 6px rgba(30, 40, 55, 0.055), inset 1px 1px 0 #fff, inset -1px -1px 0 rgba(40, 50, 60, 0.055); }
 .search-input { flex: 1; background: transparent; border: none; outline: none; color: var(--text-primary); font-size: 14px; font-family: inherit; resize: none; min-height: 34px; padding: 6px 0 0; line-height: 1.5; }
 .quality-badge { margin-top: 7px; }
-.search-action, .download-btn { width: 34px; height: 34px; flex: 0 0 34px; margin: 1px 0 0; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); cursor: pointer; border: 1px solid transparent; border-radius: 50%; line-height: 1; transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast); }
-.search-action i, .download-btn i { display: block; line-height: 1; }
+.download-btn { width: 34px; height: 34px; flex: 0 0 34px; margin: 1px 0 0; padding: 0; display: flex; align-items: center; justify-content: center; color: #4d535a; font-size: 18px; cursor: pointer; border: 1px solid transparent; border-radius: 50%; line-height: 1; transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast); }
+.download-btn i { display: block; line-height: 1; }
 #downloadIcon { transform: translateY(-1px); }
-.search-action:hover, .download-btn:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.38); border-color: rgba(255, 255, 255, 0.62); box-shadow: 0 3px 9px rgba(35, 45, 60, 0.06), var(--glass-inset); }
-.search-action:active, .download-btn:active { background: rgba(255, 255, 255, 0.48); }
+.download-btn:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.32); border-color: rgba(255, 255, 255, 0.58); box-shadow: 0 2px 7px rgba(35, 45, 60, 0.055), var(--glass-inset); }
+.download-btn:active { background: rgba(255, 255, 255, 0.4); }
 .quality-badge { color: var(--text-primary); font-weight: 600; font-size: 12px; padding: 0 12px; border-left: 1px solid var(--border-color); height: 20px; display: flex; align-items: center; }
-.download-btn { color: #4d535a; font-size: 18px; }
 
 /* Download Cards */
 .download-list { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 900px; margin: 0 auto; }
-.download-card { display: flex; align-items: center; gap: 14px; min-height: 69px; padding: 12px 14px; position: relative; isolation: isolate; overflow: hidden; background: var(--bg-card); border: 1px solid rgba(255, 255, 255, 0.86); border-radius: 20px; -webkit-backdrop-filter: blur(24px) saturate(150%); backdrop-filter: blur(24px) saturate(150%); box-shadow: 0 12px 28px rgba(35, 45, 60, 0.07), 0 3px 7px rgba(35, 45, 60, 0.045), inset 1px 1px 0 rgba(255, 255, 255, 0.92), inset -1px -1px 0 rgba(40, 50, 60, 0.04); transition: background var(--motion-fast), border-color var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast); }
-.download-card::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(to bottom, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.06)); opacity: 0.2; }
-.download-card:hover { background: rgba(255, 255, 255, 0.4); border-color: rgba(255, 255, 255, 0.94); box-shadow: 0 14px 30px rgba(35, 45, 60, 0.075), 0 3px 8px rgba(35, 45, 60, 0.05), var(--glass-inset); transform: translateY(-1px); }
+.download-card { display: flex; align-items: center; gap: 14px; min-height: 69px; padding: 12px 14px; position: relative; isolation: isolate; overflow: hidden; background: var(--bg-card); border: 1px solid rgba(255, 255, 255, 0.82); border-radius: 20px; -webkit-backdrop-filter: blur(24px) saturate(150%); backdrop-filter: blur(24px) saturate(150%); box-shadow: 0 12px 27px rgba(35, 45, 60, 0.065), 0 2px 6px rgba(35, 45, 60, 0.045), inset 1px 1px 0 rgba(255, 255, 255, 0.9), inset -1px -1px 0 rgba(40, 50, 60, 0.045); transition: background var(--motion-fast), border-color var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast); }
+.download-card::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(135deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.04) 52%, rgba(40, 50, 60, 0.03)); opacity: 0.17; }
+.download-card:hover { background: rgba(255, 255, 255, 0.34); border-color: rgba(255, 255, 255, 0.9); box-shadow: 0 13px 28px rgba(35, 45, 60, 0.07), 0 2px 6px rgba(35, 45, 60, 0.05), var(--glass-inset); transform: translateY(-1px); }
 .download-card.completed { border-color: rgba(70, 150, 90, 0.2); }
 .download-card.error { border-color: rgba(190, 70, 75, 0.24); }
 .download-card.cancelled { opacity: 0.7; }
@@ -398,7 +397,7 @@ main { flex: 1; display: flex; flex-direction: column; padding: 16px 24px; gap: 
 .control-icon.close:hover { background-color: #c84a4f; color: white; box-shadow: 0 4px 14px rgba(150, 45, 50, 0.16); }
 
 /* Footer */
-footer { height: var(--footer-height); background: rgba(255, 255, 255, 0.2); border-top: 1px solid rgba(255, 255, 255, 0.36); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-size: 10px; color: var(--text-muted); }
+footer { height: var(--footer-height); background: rgba(255, 255, 255, 0.16); border-top: 1px solid rgba(255, 255, 255, 0.3); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-size: 10px; color: var(--text-muted); }
 .footer-left { display: flex; gap: 4px; }
 .footer-center { flex: 1; text-align: center; }
 .footer-right { display: flex; align-items: center; gap: 4px; }

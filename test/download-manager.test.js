@@ -147,25 +147,38 @@ test('Phase 2 engine recovery does not create a normal retry loop', async () => 
   assert.equal(manager.list()[0].last_error_category, 'ENGINE');
 });
 
-test('queue persists across restart', () => {
+test('new app session starts with an empty queue', () => {
   const { directory, manager } = setup(async () => success());
-  manager.enqueue(input('persisted'));
-  const restored = new DownloadManager({
+  manager.enqueue(input('session-only'));
+  const nextSession = new DownloadManager({
     jobsPath: path.join(directory, 'download-jobs.json'),
     executor: async () => success()
   });
-  restored.load();
-  assert.equal(restored.list()[0].url, 'persisted');
-  assert.equal(restored.list()[0].state, JOB_STATES.QUEUED);
+  nextSession.load();
+  assert.deepEqual(nextSession.list(), []);
+  assert.equal(fs.existsSync(path.join(directory, 'download-jobs.json')), false);
 });
 
-test('interrupted active state is recovered as queued', () => {
+test('previous download-jobs cache is normalized then discarded', () => {
   const { directory, manager } = setup(async () => success());
-  fs.writeFileSync(manager.jobsPath, JSON.stringify([{ ...input('crashed'), id: 'old', state: 'DOWNLOADING', progress_percent: 72 }]));
+  const records = [];
+  manager.logger = record => records.push(record);
+  fs.writeFileSync(manager.jobsPath, JSON.stringify([
+    { ...input('done'), id: 'done', state: 'DONE', progress_percent: 0, speed: 123, eta: 8 },
+    { ...input('crashed'), id: 'old', state: 'DOWNLOADING', progress_percent: 72 }
+  ]));
   manager.load();
-  assert.equal(manager.list()[0].state, JOB_STATES.QUEUED);
-  assert.equal(manager.list()[0].progress_percent, 0);
-  assert.equal(fs.existsSync(path.join(directory, 'download-jobs.json')), true);
+  assert.deepEqual(manager.list(), []);
+  assert.equal(records.find(record => record.event === 'legacy_cache_discarded').normalized_done_count, 1);
+  assert.equal(fs.existsSync(manager.jobsPath), false);
+});
+
+test('legacy queue cleanup is safe when cache is absent or invalid', () => {
+  const { manager } = setup(async () => success());
+  assert.deepEqual(manager.load(), []);
+  fs.writeFileSync(manager.jobsPath, '{invalid');
+  assert.deepEqual(manager.load(), []);
+  assert.equal(fs.existsSync(manager.jobsPath), false);
 });
 
 test('DONE requires exact output path to exist', async () => {
@@ -175,6 +188,28 @@ test('DONE requires exact output path to exist', async () => {
   await manager.waitForIdle();
   assert.equal(manager.list()[0].state, JOB_STATES.FAILED);
   assert.equal(manager.list()[0].last_error_category, 'VERIFYING');
+});
+
+test('DONE transition forces progress to 100 and clears live telemetry', async () => {
+  const { manager } = setup(async (job, context) => {
+    context.update({ progress_percent: 0, speed: 500, eta: 20 });
+    return success();
+  });
+  manager.enqueue(input());
+  manager.start();
+  await manager.waitForIdle();
+  assert.equal(manager.jobs[0].state, JOB_STATES.DONE);
+  assert.equal(manager.jobs[0].progress_percent, 100);
+  assert.equal(manager.jobs[0].speed, null);
+  assert.equal(manager.jobs[0].eta, null);
+});
+
+test('DONE snapshot never reports zero percent', () => {
+  const { manager } = setup(async () => success());
+  manager.jobs = [{ id: 'legacy', state: JOB_STATES.DONE, progress_percent: 0, speed: 1, eta: 1 }];
+  assert.equal(manager.list()[0].progress_percent, 100);
+  assert.equal(manager.list()[0].speed, null);
+  assert.equal(manager.list()[0].eta, null);
 });
 
 test('playlist items use the same manager and concurrency', async () => {

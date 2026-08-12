@@ -1,6 +1,5 @@
 const { EventEmitter } = require('events');
 const fs = require('fs');
-const path = require('path');
 const PROGRESS_PREFIX = '__YTD_PROGRESS__:';
 
 const JOB_STATES = Object.freeze({
@@ -21,13 +20,6 @@ const ACTIVE_STATES = new Set([
   JOB_STATES.MERGING,
   JOB_STATES.VERIFYING
 ]);
-const INTERRUPTED_STATES = new Set([
-  JOB_STATES.METADATA,
-  JOB_STATES.DOWNLOADING,
-  JOB_STATES.MERGING,
-  JOB_STATES.VERIFYING
-]);
-
 function safeMessage(message) {
   return String(message || 'Unknown error')
     .replace(/(?:set-)?cookie\s*[:=]\s*[^\r\n]+/gi, 'cookie=[REDACTED]')
@@ -66,6 +58,7 @@ function parseYtDlpProgress(line) {
 }
 
 function persistedJob(job) {
+  const done = job.state === JOB_STATES.DONE;
   return {
     id: job.id,
     url: job.url,
@@ -75,11 +68,11 @@ function persistedJob(job) {
     subdirectory: job.subdirectory,
     created_time: job.created_time,
     state: job.state,
-    progress_percent: job.progress_percent,
+    progress_percent: done ? 100 : Number(job.progress_percent || 0),
     downloaded_bytes: job.downloaded_bytes,
     total_bytes: job.total_bytes,
-    speed: job.speed,
-    eta: job.eta,
+    speed: done ? null : job.speed,
+    eta: done ? null : job.eta,
     exact_output_path: job.exact_output_path,
     last_error_category: job.last_error_category,
     last_error_message: job.last_error_message,
@@ -110,26 +103,30 @@ class DownloadManager extends EventEmitter {
     this.jobs = [];
     this.active = new Map();
     this.running = false;
-    this.lastProgressPersist = new Map();
     this.idleResolvers = [];
   }
 
   load() {
+    this.jobs = [];
+    if (!this.fileSystem.existsSync(this.jobsPath)) return [];
     try {
-      if (!this.fileSystem.existsSync(this.jobsPath)) return [];
       const loaded = JSON.parse(this.fileSystem.readFileSync(this.jobsPath, 'utf8'));
-      this.jobs = Array.isArray(loaded) ? loaded.map(job => ({
-        ...job,
-        state: INTERRUPTED_STATES.has(job.state) ? JOB_STATES.QUEUED : job.state,
-        progress_percent: INTERRUPTED_STATES.has(job.state) ? 0 : Number(job.progress_percent || 0),
-        retry_count: Number(job.retry_count || 0)
-      })) : [];
-      this._persist();
+      const discarded = Array.isArray(loaded) ? loaded.map(persistedJob) : [];
+      this.logger({
+        event: 'legacy_cache_discarded',
+        job_count: discarded.length,
+        normalized_done_count: discarded.filter(job => job.state === JOB_STATES.DONE && job.progress_percent === 100).length
+      });
     } catch (error) {
-      this.jobs = [];
       this.logger({ event: 'load_failed', failure_category: 'PERSISTENCE', message: safeMessage(error.message) });
+    } finally {
+      try {
+        this.fileSystem.unlinkSync(this.jobsPath);
+      } catch (error) {
+        if (error.code !== 'ENOENT') this.logger({ event: 'cleanup_failed', failure_category: 'PERSISTENCE', message: safeMessage(error.message) });
+      }
     }
-    return this.list();
+    return [];
   }
 
   start() {
@@ -178,7 +175,7 @@ class DownloadManager extends EventEmitter {
     };
     this.jobs.push(job);
     this._log(job, { event: 'created' });
-    this._changed(true);
+    this._changed();
     this._drain();
     return { added: true, job: { ...persistedJob(job) } };
   }
@@ -220,7 +217,7 @@ class DownloadManager extends EventEmitter {
       cancel_requested: false
     });
     this._log(job, { event: 'manual_retry' });
-    this._changed(true);
+    this._changed();
     this._drain();
     return true;
   }
@@ -229,7 +226,7 @@ class DownloadManager extends EventEmitter {
     const removable = new Set(states);
     const before = this.jobs.length;
     this.jobs = this.jobs.filter(job => !removable.has(job.state));
-    if (this.jobs.length !== before) this._changed(true);
+    if (this.jobs.length !== before) this._changed();
     return before - this.jobs.length;
   }
 
@@ -247,7 +244,7 @@ class DownloadManager extends EventEmitter {
       this.active.set(job.id, control);
       void this._run(job, control).finally(() => {
         this.active.delete(job.id);
-        this._changed(true);
+        this._changed();
         this._drain();
         this._resolveIdle();
       });
@@ -268,10 +265,7 @@ class DownloadManager extends EventEmitter {
           update: patch => {
             if (job.state === JOB_STATES.CANCELLED) return;
             Object.assign(job, patch);
-            const last = this.lastProgressPersist.get(job.id) || 0;
-            const persist = this.now() - last >= 1000;
-            if (persist) this.lastProgressPersist.set(job.id, this.now());
-            this._changed(persist);
+            this._changed();
           },
           registerProcess: process => { control.process = process; },
           isCancelled: () => job.state === JOB_STATES.CANCELLED || job.cancel_requested
@@ -305,7 +299,7 @@ class DownloadManager extends EventEmitter {
           eta: null
         });
         this._log(job, { event: 'transient_retry', failure_category: category });
-        this._changed(true);
+        this._changed();
         continue;
       }
       this._fail(job, category, message);
@@ -322,8 +316,13 @@ class DownloadManager extends EventEmitter {
   _transition(job, state, extra = {}) {
     const previous = job.state;
     job.state = state;
+    if (state === JOB_STATES.DONE) {
+      job.progress_percent = 100;
+      job.speed = null;
+      job.eta = null;
+    }
     this._log(job, { event: 'state_transition', from: previous, to: state, ...extra });
-    this._changed(true);
+    this._changed();
   }
 
   _log(job, fields) {
@@ -335,20 +334,8 @@ class DownloadManager extends EventEmitter {
     });
   }
 
-  _changed(persist) {
-    if (persist) this._persist();
+  _changed() {
     this.emit('jobs', this.list());
-  }
-
-  _persist() {
-    try {
-      this.fileSystem.mkdirSync(path.dirname(this.jobsPath), { recursive: true });
-      const tempPath = `${this.jobsPath}.tmp`;
-      this.fileSystem.writeFileSync(tempPath, JSON.stringify(this.jobs.map(persistedJob), null, 2), 'utf8');
-      this.fileSystem.renameSync(tempPath, this.jobsPath);
-    } catch (error) {
-      this.logger({ event: 'persist_failed', failure_category: 'PERSISTENCE', message: safeMessage(error.message) });
-    }
   }
 
   _resolveIdle() {

@@ -220,8 +220,6 @@ document.getElementById('btnChangelog')?.addEventListener('click', event => {
     event.preventDefault();
     window.electronAPI.openExternal('https://github.com/yt-dlp/yt-dlp/releases');
 });
-document.getElementById('btnLoginURL')?.addEventListener('click', () => document.getElementById('btnLogin').click());
-
 downloadBtn?.addEventListener('click', async () => {
     const urls = urlInput.value.split('\n').map(url => url.trim()).filter(Boolean);
     if (!urls.length) return;

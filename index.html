@@ -9,6 +9,18 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
+    <svg class="refraction-defs" width="0" height="0" aria-hidden="true">
+        <defs>
+            <filter id="searchRefraction" x="-8%" y="-16%" width="116%" height="132%" color-interpolation-filters="sRGB">
+                <feImage href="resources/refraction-map.svg" preserveAspectRatio="none" result="map" />
+                <feDisplacementMap in="SourceGraphic" in2="map" scale="18" xChannelSelector="R" yChannelSelector="G" />
+            </filter>
+            <filter id="cardRefraction" x="-6%" y="-12%" width="112%" height="124%" color-interpolation-filters="sRGB">
+                <feImage href="resources/refraction-map.svg" preserveAspectRatio="none" result="map" />
+                <feDisplacementMap in="SourceGraphic" in2="map" scale="11" xChannelSelector="R" yChannelSelector="G" />
+            </filter>
+        </defs>
+    </svg>
 
     <!-- Custom Header Titlebar -->
     <header>

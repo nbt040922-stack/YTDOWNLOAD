@@ -20,7 +20,7 @@ test('URL input contains only textarea and aligned download action', () => {
   assert.match(search, /id="urlInput"/);
   assert.match(search, /id="downloadBtn"/);
   assert.doesNotMatch(search, /btnLoginURL|fa-user-circle/);
-  assert.match(css, /\.download-btn \{[^}]*width: 34px;[^}]*height: 34px;[^}]*align-items: center;[^}]*justify-content: center;/);
+  assert.match(css, /\.download-btn \{[^}]*width: 40px;[^}]*height: 40px;[^}]*align-items: center;[^}]*justify-content: center;/);
   assert.match(css, /#downloadIcon \{ transform: translateY\(-1px\); \}/);
 });
 

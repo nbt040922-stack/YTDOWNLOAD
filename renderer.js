@@ -7,11 +7,9 @@ function escapeHtml(str) {
 
 const downloadBtn = document.getElementById('downloadBtn');
 const urlInput = document.getElementById('urlInput');
-const currentPathText = document.getElementById('currentPath');
 const downloadList = document.getElementById('downloadList');
 const welcomeArea = document.getElementById('welcomeArea');
 const engineLabel = document.getElementById('engineLabel');
-const storagePicker = document.getElementById('storagePicker');
 const activeStates = new Set(['METADATA', 'DOWNLOADING', 'MERGING', 'VERIFYING']);
 let currentSavePath = '';
 let downloadJobs = [];
@@ -156,18 +154,19 @@ window.electronAPI.onAuthStateUpdated(updateAuthStateView);
 
 async function initApp() {
     currentSavePath = await window.electronAPI.getDefaultPath();
-    if (currentPathText) currentPathText.innerText = currentSavePath;
     updateEngineStatusView(await window.electronAPI.getEngineStatus());
     updateAuthStateView(await window.electronAPI.getAuthState());
     renderAllJobs(await window.electronAPI.getDownloadJobs());
 }
 
-storagePicker?.addEventListener('click', async () => {
+document.getElementById('btnSelectFolder')?.addEventListener('click', async () => {
     const newPath = await window.electronAPI.selectFolder();
-    if (newPath) {
-        currentSavePath = newPath;
-        if (currentPathText) currentPathText.innerText = newPath;
-    }
+    if (newPath) currentSavePath = newPath;
+});
+
+document.getElementById('btnOpenDownloadFolder')?.addEventListener('click', async () => {
+    const result = await window.electronAPI.openDownloadFolder();
+    if (!result.ok) alert('Cannot open download folder: ' + result.error);
 });
 
 const menuItems = document.querySelectorAll('.menu-item');

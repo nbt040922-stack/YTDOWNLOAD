@@ -395,6 +395,16 @@ ipcMain.handle('select-folder', async () => {
   }
   return null;
 });
+ipcMain.handle('open-download-folder', async () => {
+  const folderPath = currentSavePath || app.getPath('downloads');
+  try {
+    fs.mkdirSync(folderPath, { recursive: true });
+    const error = await shell.openPath(folderPath);
+    return error ? { ok: false, error } : { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
 ipcMain.handle('get-default-path', () => currentSavePath || app.getPath('downloads'));
 
 app.whenReady().then(async () => {

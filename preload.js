@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Storage and Core
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+  openDownloadFolder: () => ipcRenderer.invoke('open-download-folder'),
   getDefaultPath: () => ipcRenderer.invoke('get-default-path'),
   loginYouTube: () => ipcRenderer.invoke('login-youtube'),
   logoutYouTube: () => ipcRenderer.invoke('logout-youtube'),

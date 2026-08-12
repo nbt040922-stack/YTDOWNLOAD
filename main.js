@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { DownloadManager, JOB_STATES, PROGRESS_PREFIX, parseYtDlpProgress } = require('./download-manager');
+const { ContentOpsBridge } = require('./contentops-bridge');
 const { YouTubeAuthSession, isAuthRequired, redactSensitive } = require('./auth-session');
 const {
   FINAL_PATH_PREFIX,
@@ -26,6 +27,7 @@ let latestDiagnostics = null;
 let updateInFlight = null;
 let downloadManager = null;
 let youtubeAuth = null;
+let contentOpsBridge = null;
 const MAX_CONCURRENT_DOWNLOADS = 2;
 
 // Dynamic Binary Path Resolver
@@ -40,6 +42,8 @@ const legacyCookiesPath = path.join(app.getPath('userData'), 'cookies.txt');
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 const logPath = path.join(app.getPath('userData'), 'app_debug.log');
 const jobsPath = path.join(app.getPath('userData'), 'download-jobs.json');
+const contentOpsRecordsPath = path.join(app.getPath('userData'), 'contentops-handoffs.json');
+const contentOpsBridgePort = Number.parseInt(process.env.CONTENTOPS_BRIDGE_PORT || '8790', 10);
 
 const spawnEnv = { ...process.env };
 
@@ -430,6 +434,12 @@ app.whenReady().then(async () => {
       logger: record => logToFile(`Download job: ${JSON.stringify(record)}`)
     });
     downloadManager.load();
+    contentOpsBridge = new ContentOpsBridge({
+      manager: downloadManager,
+      recordsPath: contentOpsRecordsPath,
+      port: contentOpsBridgePort
+    });
+    contentOpsBridge.restore();
     downloadManager.on('jobs', jobs => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('download-jobs-updated', jobs);
@@ -438,6 +448,11 @@ app.whenReady().then(async () => {
     createTray();
     createWindow();
     downloadManager.start();
+    void contentOpsBridge.start().then(() => {
+      logToFile(`Content Ops bridge listening on 127.0.0.1:${contentOpsBridgePort}`);
+    }).catch(error => {
+      logToFile(`Content Ops bridge failed: ${error.message}`);
+    });
     void periodicUpdateCheck({
       settings: getSettings(),
       saveSettings,
@@ -456,3 +471,4 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('before-quit', () => { void contentOpsBridge?.stop(); });

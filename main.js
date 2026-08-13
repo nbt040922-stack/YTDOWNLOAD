@@ -92,7 +92,8 @@ async function validateBinaries() {
       ...failures.map(name => `runtime ${name}: ${diagnostics[`${name}_status`]} (${diagnostics.errors[name] || 'unknown error'})`),
       ...fallbackFailures.map(name => `fallback ${name}: ${diagnostics[`fallback_${name}_status`]} (${diagnostics.fallback_errors[name] || 'unknown error'})`)
     ];
-    dialog.showErrorBox('System Check Failed', details.join('\n'));
+    if (contentOpsHeadless) logToFile(`System Check Failed: ${details.join('; ')}`);
+    else dialog.showErrorBox('System Check Failed', details.join('\n'));
     return false;
   }
   return true;
@@ -128,7 +129,9 @@ function recoveryLogger(record) {
 
 function ensureBinaryExists(filePath) {
   if (!fs.existsSync(filePath)) {
-    dialog.showErrorBox('Binary Not Found', `Critical file missing: ${path.basename(filePath)}\nPath: ${filePath}`);
+    const message = `Critical file missing: ${path.basename(filePath)} Path: ${filePath}`;
+    if (contentOpsHeadless) logToFile(message);
+    else dialog.showErrorBox('Binary Not Found', message);
     return false;
   }
   return true;
@@ -446,8 +449,10 @@ app.whenReady().then(async () => {
         mainWindow.webContents.send('download-jobs-updated', jobs);
       }
     });
-    createTray();
-    createWindow();
+    if (!contentOpsHeadless) {
+      createTray();
+      createWindow();
+    }
     downloadManager.start();
     void contentOpsBridge.start().then(() => {
       logToFile(`Content Ops bridge listening on 127.0.0.1:${contentOpsBridgePort}`);

@@ -38,6 +38,12 @@ test('bridge rejects non-loopback bind', () => {
   );
 });
 
+test('headless startup creates no BrowserWindow or Tray', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.match(source, /if \(!contentOpsHeadless\) \{\s*createTray\(\);\s*createWindow\(\);\s*\}/);
+  assert.match(source, /if \(contentOpsHeadless\) logToFile/);
+});
+
 function httpJson(method, port, route, payload) {
   return new Promise((resolve, reject) => {
     const body = payload ? JSON.stringify(payload) : '';

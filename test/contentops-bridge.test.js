@@ -107,6 +107,18 @@ test('GET state returns exact verified path when DONE', async () => {
   assert.equal(job.downloaded_file_path, 'D:\\ContentOps_Work\\123\\source.mp4');
 });
 
+test('GET state exposes authoritative metadata title from downloader', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'contentops-'));
+  const { bridge, manager } = setup(root, async (_job, context) => {
+    context.update({ title: '【コストコ】日本語タイトル' });
+    return { ok: true, outputPath: 'D:\\ContentOps_Work\\123\\source.mp4' };
+  });
+  const externalId = bridge.submit(request()).job.external_id;
+  manager.start();
+  await manager.waitForIdle();
+  assert.equal(bridge.get(externalId).title, '【コストコ】日本語タイトル');
+});
+
 test('restart restores active handoff without changing external id', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'contentops-'));
   const first = setup(root);

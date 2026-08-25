@@ -122,6 +122,7 @@ class ContentOpsBridge {
         : null;
       Object.assign(record, {
         state: job.state,
+        title: job.title || record.title || null,
         progress_percent: job.progress_percent || 0,
         downloaded_file_path: job.exact_output_path || null,
         error,
